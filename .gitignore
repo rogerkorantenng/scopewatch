@@ -1,0 +1,10 @@
+__pycache__/
+*.pyc
+.venv/
+.pytest_cache/
+.ruff_cache/
+# visioncore caches fetched models under their spec name. The one model this
+# product uses is committed as models/yolox_tiny.onnx and its checksum is verified
+# at build time; the cache copy is a duplicate 20 MB.
+products/scopewatch/models/yolox-tiny-*.onnx
+products/scopewatch/media/eval/

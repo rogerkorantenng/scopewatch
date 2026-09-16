@@ -1,0 +1,37 @@
+[project]
+name = "scopewatch"
+version = "1.0.0"
+description = "Measures blood on the laparoscopic field, timestamps bleeding onset, and holds a safety checkpoint before the irreversible step."
+requires-python = ">=3.12"
+dependencies = [
+    # PINNED HARD. Unpinned `opencv-python` resolves to 4.14.x, which shipped after
+    # 5.0.0 and would fail the competition's core requirement.
+    "opencv-python-headless==5.0.0.93",
+    "numpy==2.5.3",
+    "fastapi==0.141.1",
+    "uvicorn[standard]==0.53.0",
+    "python-multipart==0.0.32",
+    "pydantic==2.13.5",
+]
+
+[project.optional-dependencies]
+# Evaluation only. Never installed into the deployed container.
+eval = ["matplotlib==3.11.0"]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/scopewatch"]
+
+[tool.hatch.metadata]
+allow-direct-references = true
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-q --strict-markers"
+markers = [
+    "slow: takes more than a second",
+    "model: needs the YOLOX ONNX file on disk",
+]

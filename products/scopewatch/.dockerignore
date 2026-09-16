@@ -1,0 +1,18 @@
+# Build context exclusions for the Scopewatch image.
+#
+# The context is the REPO ROOT, so every pattern here is written relative to the
+# repo root and uses **/ to match at any depth.
+#
+# Note on where this file has to live: with `-f products/scopewatch/Dockerfile .`
+# BuildKit reads `products/scopewatch/Dockerfile.dockerignore` first and falls
+# back to a `.dockerignore` at the context root - it never reads this path. The
+# sibling Dockerfile.dockerignore is the copy that takes effect; this one holds
+# the same list so the exclusions are findable under the name people look for.
+
+**/.venv
+**/__pycache__
+**/*.pyc
+.git
+**/.pytest_cache
+**/node_modules
+**/docs/deck
