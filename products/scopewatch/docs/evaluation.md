@@ -284,6 +284,32 @@ would be a confident wrong number, which is the worst output this product can ha
 
 # Part B: synthetic scenes
 
+## B0. Before and after the real-footage changes, with the regressions
+
+The sections after this one were written for the build before real footage
+(`567d814`) and keep its numbers as the record of how that build was tuned.
+`docs/evaluation.json` now holds the numbers below. The same scenes, seeds and cases
+were used for both.
+
+| Synthetic measure | Before | After | |
+|---|---|---|---|
+| Segmentation Dice, with distractor (colour trial) | 0.994 (`ratio_dark`) | 0.833 (`chroma_scene`) | **regression** |
+| Area error, mean / 95th percentile | -0.98% / 3.3% | -19.9% / 100% | **regression**: 400 px pools (0.2% of the field) are dropped entirely, and one 1,200 px pool is |
+| Area error, pools 4,000 px and up (median) | -0.9% to -0.2% | -0.8% to +0.2% | unchanged |
+| Scale error, mean | -0.3% | -2.4% | **regression**: the edge profile reads the anti-aliased rim of a drawn shaft |
+| Volume interval contains the truth | 48 of 48 | 39 of 48 | **regression**: the nine misses are the dropped small pools |
+| Onset detected / false onsets | 3 of 3 / 0 of 3 | 3 of 3 / 0 of 3 | unchanged (at 3 %/min it was 2 false onsets of 3, which set the 8 %/min default) |
+| Onset timing error, median | 1.58 s | 1.17 s | |
+| Checkpoint raised (with `auto_checkpoint` on) | 6 of 6, 4.0 s after the device | 6 of 6, 5.25 s after | slower by the 1.5 s persistence |
+| Phase frame accuracy | 0.762 | 0.786 | |
+| Fog 0.1 (not refused), area error if forced | -3.2% | -39.8% | **regression**: haze lowers chroma, and the fog gate's operating point was set for the old segmenter |
+| Cost per frame at 960 x 540 | 38.8 ms | 142.9 ms | **regression**, measured while other jobs shared the machine; the edge profiles, domain cues and chroma decision are all new work per frame |
+
+Plainly: the new segmenter is worse on the renderer and better on real tissue, and the
+renderer is not the thing being measured. The small-pool floor (0.4% of the field) was
+chosen on real dev frames, where smaller components were mostly red tissue. Blood below
+that share of the view is not reported.
+
 ## 1. Method
 
 `scopewatch.synth` draws a laparoscopic field with OpenCV primitives: a circular
