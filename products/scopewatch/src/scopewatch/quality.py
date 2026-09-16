@@ -107,6 +107,18 @@ class QualityLedger:
 # ---------------------------------------------------------------------------
 
 
+def erode_disc(mask: np.ndarray, radius: int) -> np.ndarray:
+    """Erode a binary mask by a disc, via the distance transform.
+
+    Equivalent to `cv2.erode` with an elliptical kernel of that radius, and several
+    times cheaper at the radii used here (15 to 20 px), where the kernel erosion was
+    the single most expensive call in the frame.
+    """
+    binary = (mask > 0).astype(np.uint8)
+    dist = cv2.distanceTransform(binary, cv2.DIST_L2, 3)
+    return (dist > radius).astype(np.uint8)
+
+
 def field_mask(image: np.ndarray, *, min_fraction: float = 0.25) -> np.ndarray:
     """The circular image the scope actually projects, excluding the black surround.
 
@@ -262,10 +274,7 @@ def assess(
         # eroded core, away from the rim. The blood and occlusion statistics use
         # the full lit region, because a pool at the edge of the field is still a
         # pool.
-        core = cv2.erode(
-            lit.astype(np.uint8),
-            cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (31, 31)),
-        )
+        core = erode_disc(lit, 15)
         if core.sum() < 0.2 * max(1, lit.sum()):
             core = lit.astype(np.uint8)
         grey = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)

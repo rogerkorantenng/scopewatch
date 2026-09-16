@@ -476,8 +476,8 @@ def aperture_core(field: np.ndarray, *, margin: float = CHROMA_APERTURE_MARGIN) 
     """
     h, w = field.shape[:2]
     r = max(1, round(margin * max(h, w)))
-    kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (2 * r + 1, 2 * r + 1))
-    return cv2.erode(field.astype(np.uint8), kernel)
+    binary = (field > 0).astype(np.uint8)
+    return (cv2.distanceTransform(binary, cv2.DIST_L2, 3) > r).astype(np.uint8)
 
 
 def lit_enough(lightness: np.ndarray, core: np.ndarray, *,
@@ -493,8 +493,8 @@ def lit_enough(lightness: np.ndarray, core: np.ndarray, *,
     shrunk = cv2.resize(lightness, small, interpolation=cv2.INTER_AREA)
     blurred = cv2.GaussianBlur(shrunk, (0, 0), max(1.0, 0.06 * max(small)))
     illumination = cv2.resize(blurred, (w, h), interpolation=cv2.INTER_LINEAR)
-    sel = core.astype(bool)
-    median = float(np.median(lightness[sel])) if sel.any() else 50.0
+    sel = core[::3, ::3].astype(bool)
+    median = float(np.median(lightness[::3, ::3][sel])) if sel.any() else 50.0
     return illumination >= floor * median
 
 
@@ -531,8 +531,11 @@ def segment_chroma_scene(image: np.ndarray, valid: np.ndarray) -> np.ndarray:
     if core.sum() < 256:
         return np.zeros(image.shape[:2], np.uint8)
     lit = lit_enough(lightness, core)
-    median_per_l = float(np.median(per_l[core]))
-    median_hue = float(np.median(hue[core]))
+    # Scene medians on every third pixel: the same statistic to well under a level,
+    # at a ninth of the cost of sorting the whole field.
+    sparse = core[::3, ::3]
+    median_per_l = float(np.median(per_l[::3, ::3][sparse]))
+    median_hue = float(np.median(hue[::3, ::3][sparse]))
     colour = (
         (chroma >= CHROMA_MIN)
         & (hue >= CHROMA_HUE_DEG[0]) & (hue <= CHROMA_HUE_DEG[1])

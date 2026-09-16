@@ -4,6 +4,54 @@ Technical report, OpenCV AI Competition 2026.
 
 ---
 
+## 0. What real footage showed, and what changed
+
+Scopewatch was designed and evaluated on synthetic laparoscopic scenes, where every
+number it reported could be checked and was right. It was then run on sixteen openly
+licensed real surgical clips from Wikimedia Commons and Zenodo, locally and on the live
+service, with identical results. On real video it failed in five ways:
+
+1. **Blood.** A clearly bleeding field (WSES ulcer repair) read 0.00 ml on 555 of 561
+   frames. A nearly bloodless one (Barroso hernia repair) read up to 9.97 ml, all of it
+   shadowed tissue at the rim of the scope's circle. On the Kavalakat omentectomy the
+   inside of a port sleeve was called blood.
+2. **Onset** fired on none of the sixteen clips, and on three the reason said a slope of
+   17.87, 19.13 or 98.11 ml/min "never reached 0.35 ml/min", which was false.
+3. **The checkpoint** was held 26.4 to 27.8 s into five clips: the 20-second dwell
+   plus start-up, whatever was in the picture.
+4. **Scale** was missing on five clips with shafts in plain view, and where present
+   implied a field 92 to 205 mm wide.
+5. **Gates**: an open operation was measured as if laparoscopic.
+
+How each was found, frame by frame, and what was done about it:
+
+| Defect | Root cause, as measured | Change | Result on real footage |
+|---|---|---|---|
+| Blood missed on a bleeding field | "Redder than the tissue mode and darker than its surroundings": with a lot of blood in view neither vote holds | Chroma per unit lightness, red hue, saturation relative to the scene; darkness is not used as evidence | Held-out clips: pixel precision 0% to 13.0%, recall 0% to 10.7% |
+| Rim shadow and port sleeve called blood | Vignetting and shadow are "darker than their surroundings" | The rim is removed, badly lit regions are not classified | Barroso peaks at 0.0% of the field; sleeve crop 11% to 1.4% |
+| False onset reason | The message ignored two of the five gates. The high slopes came from mis-segmentation and from unscaled frames entering the series as 0 ml | Reason counts every gate; gaps hold the last value; onset runs on the field share | Still no onset on any clip, now with the true reason: camera motion and instrument changes |
+| Checkpoint on a timer | The width cue compared a p95 with a median of p50s and was true on 70 to 89% of frames before the dwell armed it | Same statistic on both sides, must persist, dwell only arms it; **automatic checkpoint off by default** | Not on a timer, but still fooled by a grasper near the lens, hence demoted |
+| Scale missing / 2x coarse | Pixel floors set at 960 px; the steel mask is the lit stripe of the shaft, a median 2.2x narrower than the shaft | Floors scale with the frame; width measured edge to edge | Implied field 46 to 108 mm, but the scale varies 29 to 61% within a clip, so the volume is withheld on all 16 |
+| Open surgery accepted | No domain gate | `OUT_OF_DOMAIN` on cool-hue drapes and large near-white objects in a saturated field | Gupta refused; Kaplan S6's draped tail refused; about 18 laparoscopic frames wrongly refused |
+
+**What the product outputs now follows from that table.** The headline is the share of
+the visible field segmented as blood and its rate of change, shown with the precision
+and recall measured on held-out real frames. A volume in millilitres appears only when
+the instrument scale is present and steady, labelled as never validated on real
+footage, and otherwise the row says `CANNOT_MEASURE` with the reason. On all sixteen
+real clips it says `CANNOT_MEASURE`.
+
+**There is no ground-truth blood volume for any real clip, and there never will be from
+these sources.** Nobody weighed the swabs. So no millilitre figure in this product has
+been checked against reality, and this report does not claim an accuracy in
+millilitres on real footage. What real footage can check, and what
+[evaluation.md](evaluation.md) Part A reports, is whether blood pixels are blood
+(against 64 hand-labelled frames), whether refusals fire, whether onset fires and why
+not, and whether the checkpoint depends on the picture. The sections below describe the
+design; where real footage changed it, they say so.
+
+---
+
 ## 1. The problem, with evidence
 
 ### 1.1 Blood loss is estimated by eye, and the eye is wrong
@@ -184,8 +232,21 @@ no darker, which is exactly what a redness-only segmenter calls a haemorrhage.
 
 The candidates: a fixed HSV hue range; Lab a*; YCrCb Cr; normalised redness
 (R-G)/(R+G); Lab a* combined with L*; and normalised redness combined with a flattened
-L*. The scores are in [evaluation.md](evaluation.md) and the winner is the last one.
-Three findings came out of that sweep and each one changed the code.
+L*. The scores are in [evaluation.md](evaluation.md) and the synthetic winner is the
+last one. Three findings came out of that sweep and each one changed the code.
+
+**Then real footage overturned the choice.** The synthetic winner, `ratio_dark`, scored
+0% precision and 0% recall on held-out real clips. A seventh candidate, `chroma_scene`,
+now ships, chosen on the dev half of hand-labelled real frames. It asks for chroma per
+unit lightness (blood is deeply coloured for how light it is; shadow is dark and grey;
+pink tissue is coloured but light), a red Lab hue between 8 and 50 degrees, and chroma
+per lightness at least 1.35 times the scene's median, because under a warm light a whole
+field of bowel can pass the absolute tests. It never uses darkness as evidence. It drops
+a rim of 2% of the frame and anything lit below 35% of the field's median, and fills
+specular highlights back in where they sit on a candidate region. On synthetic scenes it
+scores within a few thousandths of the old winner (Part B of the evaluation). On real
+held-out clips it is better and still poor. The findings below are about the synthetic
+sweep, and they stand as a record of how the original decision was made.
 
 **Otsu is the wrong tool when the target is a minority class.** Otsu assumes two
 comparable populations. A frame with a large pool has blood on a few per cent of the
@@ -237,7 +298,18 @@ catalogue. That makes every instrument in view a calibration target, and it is h
 Scopewatch gets millimetres per pixel out of a monocular video with nothing added to
 the theatre: no marker, no chessboard, no second camera.
 
-The shaft's width is measured on its medial axis - `distanceTransform`, then the ridge,
+**Real footage changed this measurement.** On a wet steel shaft under a scope's light
+only the stripe facing the light passes the "bright and low saturation" steel test, so
+the medial-axis width was half the shaft: a median 2.2 times too narrow on nine real
+shafts, which is why the field of view came out about twice too wide. The scale now
+comes from an edge-to-edge width read off saturation profiles across the shaft axis,
+measured near where each instrument enters the field so that crossed instruments are
+still apart. The medial-axis width described next is still used for the instrument count
+and the phase features. The pixel floors are scaled with the frame, because a 900-pixel
+area floor set on 960-pixel frames threw away every shaft on the 320 x 240 clips. And the
+scale is gated over the whole case: see 4.4.
+
+The shaft's width was originally measured on its medial axis - `distanceTransform`, then the ridge,
 then the median of twice the distance, with the ends trimmed because a grasper's jaws
 flare and the port end is a partial cross-section. This is the same measurement
 `visioncore.stroke_width_profile` performs for crack widths, and it carries the same
@@ -268,6 +340,15 @@ can only make the true area larger than the projection, never smaller.
 
 ### 4.4 Area to volume, and the honesty it requires
 
+**On real footage the volume is withheld.** A shaft's apparent width moves with its
+distance from the lens, and the blood lies at yet another distance, so the per-frame
+scale on real clips varies by 29 to 61% (robust coefficient of variation). A volume is
+now computed only when at least 25% of measurable frames and at least 50 frames carry a
+shaft scale and that variation is under 25%, at the case's median scale. Otherwise the
+record carries `CANNOT_MEASURE` with `NO_SCALE_REFERENCE` or `SCALE_INCONSISTENT`. No real
+clip passes. The arithmetic below is unchanged and applies on synthetic scenes and
+whenever an operator supplies the scale.
+
 Pixel area is not millilitres. Getting from one to the other needs a scale, which is
 recovered above, and a depth, which a single camera cannot see.
 
@@ -294,6 +375,19 @@ in the interface why. It is useful for comparing two halves of one case, or the 
 operation done twice. It is not a transfusion decision and the report says so.
 
 ### 4.5 Bleeding onset
+
+**What changed after real footage.** The series is now the blood-covered share of the
+field, in percentage points, with a default threshold of 8 points a minute, because the
+millilitre series needs a scale real footage does not give. Frames that cannot be
+measured hold the last measured value instead of entering as zero; the zeros had turned
+every refusal gap into a fall and a rise, and all 32 over-threshold frames on the
+Kavalakat clip had one inside their window. When no onset is declared, the reason now
+counts, for every frame whose rate crossed the threshold, the gate that stopped it:
+refused frame, camera motion, too-small blood area, an instrument entering or leaving,
+or no CUSUM confirmation. On the sixteen real clips it never fires, and the reason says
+why: every crossing happened while the camera or an instrument was moving. The design
+below is otherwise unchanged; the millilitre threshold it discusses still applies when a
+volume series exists.
 
 Two obvious approaches are both wrong. Thresholding the volume answers "when was there
 a lot of blood", which is minutes later than the event and is the delay a surgeon
@@ -344,6 +438,19 @@ instrument detector would need CholecT50's triplet annotations, which sit behind
 registration form this entry has not completed. That is named as the next step rather
 than papered over.
 
+**The automatic checkpoint is off by default, and here is why.** On real clips the
+checkpoint was held at the same 26 to 28 s on five clips. Probing every frame showed the
+wide-device cue (widest shaft's 95th-percentile mask width against a running median of
+50th percentiles) was already true on 70 to 89% of frames before the 20-second dwell
+armed it, so the dwell was the trigger. The cue now compares edge widths with edge
+widths, must hold for 1.5 s, and the dwell can only arm it; a test pins that dissection
+alone never reaches the critical approach. With that, checkpoints on real clips moved to
+43, 85 and 88 s on three Kaplan clips, driven by the picture. But in at least one of
+them the "wide device" is a black grasper nearer the lens: instrument width cannot tell a
+clip applier from a closer grasper. So the checkpoint mechanism stays (hold, confirm,
+dismiss with a reason, named person), the automatic trigger is an experimental option,
+and the interface says so.
+
 Phase inference is a transparent rule-based temporal model with hysteresis, not a
 learned classifier, and that is a choice rather than a shortcut. A checkpoint that stops
 a surgeon has to be explainable in one sentence at the moment it fires. "Two
@@ -385,7 +492,18 @@ that a pool does not is the absence of colour - gauze, a swab, a glove and a len
 are all achromatic, and blood and tissue are not - so the test is now flat **and**
 desaturated, or simply dark enough to be no image at all.
 
-A fifth refusal, `NO_SCALE_REFERENCE`, fires when nothing of known size is in the
+A sixth, `OUT_OF_DOMAIN`, came from real footage: an open cholecystectomy had been
+measured as if it were laparoscopic. It fires when drapes or gowns (a cool hue over 45%
+of the field) or large near-white objects such as gloves (over 8% of the field, in a
+field whose remaining saturation is at least 120) are in view, and a clip is refused
+when a quarter of its frames are. It refused the open clip and the draped tail of a
+laparoscopic one, and about 18 laparoscopic frames it should not have. It rests on one
+open-surgery clip. The fog gate did not fire on the real ADM_LSIR aerosol frames, and
+should not have: those are sparse bright streaks over a clear field (dark channel 55 to
+92, contrast 32 to 37), not haze. No real clip had haze, so the fog gate is still
+validated on synthetic haze only.
+
+`NO_SCALE_REFERENCE` now withholds the volume, not the frame, when nothing of known size is in the
 field. The area fraction is still reported, because it is a real, unitless, comparable
 quantity. The millilitres are withheld, and the interface says what would fix it: bring
 an instrument into view, or supply the scale directly.
@@ -437,75 +555,87 @@ deployment that does not exist.
 ## 6. Evaluation
 
 Full method, numbers and plots: [evaluation.md](evaluation.md). The machine-readable
-version is `docs/evaluation.json`, which the running service also serves at
-`/api/evaluation` so the error bars sit next to the numbers they qualify.
+versions are `docs/evaluation.json` and `docs/real-evaluation.json`; the running
+service serves the first, which includes the second, at `/api/evaluation`.
 
-**What was measured.** Synthetic operating fields generated by `scopewatch.synth`,
-where every quantity the product claims to measure is set before the pixels exist: the
-pool's area in pixels, the shaft's width in pixels, the millimetres per pixel, the film
-depth, the frame the bleed starts on, and the phase at every instant. Seven
-experiments: the colour-space trial, area error across three decades of pool size,
-scale error, volume-interval coverage, refusal curves swept across blur, fog and
-occlusion, onset timing on scripted cases with and without a bleed, and a phase
-confusion matrix with the checkpoint's timing.
+**Part A, real footage.** Sixteen openly licensed clips, run before and after. Blood is
+scored against polygons drawn on 64 fixed frames by a labeller who never saw the
+product's output, split by clip into dev (thresholds chosen) and test (not). Headline:
 
-**What was not measured, and why.** There is no clinical video in this entry. The
-published laparoscopic datasets that carry the labels Scopewatch would want -
-Endoscapes for the critical view of safety, CholecT50 for instrument and action
-triplets - are released under CC BY-NC-SA 4.0 behind registration forms that take days
-to clear, and the request has not been completed. The README carries that as an open
-item with the licence terms and their consequences.
+| Held-out real clips | Before | After |
+|---|---|---|
+| Blood pixel precision | 0.0% | 13.0% |
+| Blood pixel recall | 0.0% | 10.7% |
+| Clips showing a volume | 11 of 16 | 0 of 16 (`CANNOT_MEASURE`) |
+| Onset fired | 0 of 16, reason false on 3 | 0 of 16, reason names the gates |
+| Checkpoint on the dwell timer | 5 of 16 | 0 (and off by default) |
+| Open-surgery clip refused | no | yes |
 
-**What that means for the claims.** The synthetic numbers are real evidence about the
-estimator and no evidence at all about tissue. An area error measured against an area
-we drew says the segmentation, the morphology and the arithmetic are right. It says
-nothing about whether real peritoneum under a real xenon lamp separates from real
-pooled blood the way the renderer's does. The evaluation document states that on its
-first page, and validation on clinical video is named as the next step, not as
-something already done.
+On the dev clips, where the thresholds were chosen, precision and recall are 61% and
+50%. The distance between that and 13% and 11% is the most important thing Part A says.
+
+**Part B, synthetic scenes.** Area, scale, volume-interval coverage, refusal sweeps,
+onset timing, phase confusion and checkpoint timing, on scenes where every quantity is
+set before the pixels exist. Evidence about the arithmetic, none about tissue. Part B
+reports its before-and-after numbers and any regression.
+
+**What was not measured.** No real clip has a known blood volume, so no volume accuracy
+on real footage exists or is claimed. No clinical dataset with expert labels was used;
+the labelled datasets (Endoscapes, CholecT50) are CC BY-NC-SA behind registration forms,
+and the README carries that as an open item.
 
 ---
 
 ## 7. Limitations
 
-1. **No clinical video, no field trial, and no outcome evidence for this class of
-   tool.** See 1.4 and section 6. This is the largest limitation and nothing in this
-   entry compensates for it.
-2. **Depth is an assumption.** Volume is area times a film thickness a single camera
+1. **No ground-truth blood volume on any real footage, no field trial, and no outcome
+   evidence for this class of tool.** The real-footage evaluation is 16 public clips and
+   64 frames labelled by one non-surgeon. See 1.4 and section 6.
+2. **Blood versus red tissue.** On held-out real clips the segmentation's pixel precision
+   is 13% and recall 11%. The blood-covered share includes red tissue, and its peaks
+   are mostly camera swings toward red tissue.
+3. **Onset on a moving camera.** It has never fired on real footage. There is no image
+   stabilisation, and a still four-second window is rare in a working field.
+4. **Scale.** Missing on black-coated shafts and shafts merged with pale tissue;
+   inconsistent everywhere else, so no real clip gets a volume.
+5. **Depth is an assumption.** Volume is area times a film thickness a single camera
    cannot see. The interval is honest about that and is correspondingly wide.
-3. **Surface tilt is bounded, not measured.** A pool on a tilted surface is
+6. **Surface tilt is bounded, not measured.** A pool on a tilted surface is
    under-projected. The upper bound absorbs up to forty degrees; beyond that the number
    is wrong and nothing in the pipeline knows.
-4. **The running total is a lower bound.** Suctioned and absorbed blood leaves the
+7. **The running total is a lower bound.** Suctioned and absorbed blood leaves the
    field and is never counted. It is labelled as a lower bound in the interface, the
    record and here.
-5. **Small pools are not measurable.** The false-positive floor is a roughly constant
+8. **Small pools are not measurable.** The false-positive floor is a roughly constant
    number of pixels, so below a few thousand pixels the error swamps the measurement.
    The interval widens accordingly and the measurement is flagged unreliable rather
    than quietly reported.
-6. **Phase inference is validated only on scripted synthetic sequences.** It is a
-   transparent rule-based model, so it is auditable, but its accuracy on operative
-   video is unknown.
-7. **The DNN channel names no surgical instrument.** COCO has no such classes. It is a
+9. **Phase inference is validated only on scripted synthetic sequences**, and its
+   width cue is fooled on real video by an instrument's distance from the lens. The
+   automatic checkpoint that depends on it is off by default.
+10. **The DNN channel names no surgical instrument.** COCO has no such classes. It is a
    second opinion and a latency measurement, and the code says so in every record it
    produces.
-8. **The safety view is declared, not detected.** Scopewatch does not score the three
+11. **The safety view is declared, not detected.** Scopewatch does not score the three
    criteria of the critical view of safety. It notices that the phase suggests the
    irreversible step is near, and it asks. Scoring the criteria needs Endoscapes.
-9. **Camera motion is a translation estimate.** `phaseCorrelate` answers "did the field
+12. **Camera motion is a translation estimate.** `phaseCorrelate` answers "did the field
    move". A rotation or a zoom is not modelled, and a fast rotation could pass the gate.
-10. **Per-process state.** A held checkpoint does not survive a service restart, by
+13. **Per-process state.** A held checkpoint does not survive a service restart, by
     design: the honest state to come back in is "nothing was decided", not a checkpoint
     of unknown age that appears to have been reviewed.
-11. **x86_64 only in the deployed service**, for the App Runner reason above.
+14. **The out-of-domain gate rests on one open-surgery clip**, and wrongly refuses a
+    few laparoscopic frames with large glare or gauze.
+15. **x86_64 only in the deployed service**, for the App Runner reason above.
 
 ---
 
 ## 8. Responsible use
 
 **Scopewatch is not a medical device.** It has no regulatory clearance of any kind, it
-has not been through a field trial, it has never been run on clinical video, and it is
-not offered for intra-operative decision-making. It is a retrospective measurement and
+has not been through a field trial, it has been run only on sixteen public surgical
+videos with no known blood volumes, and it is not offered for intra-operative
+decision-making. It is a retrospective measurement and
 training instrument, and where it asks a question during a case it asks it of a person
 and records the answer.
 
@@ -521,8 +651,10 @@ in it produces a named refusal and no number. That behaviour is the feature. A t
 that reports through smoke is worse than one that stops.
 
 **No identifiable people, anywhere.** The sample media are synthetic scenes drawn with
-OpenCV primitives. There is no patient, no clinician, no face, and no real operative
-footage in this repository. Nothing here performs face recognition or any other
+OpenCV primitives. The only real operative material in this repository is six small
+crops used as regression tests (`tests/fixtures/real/`, each credited, CC BY 4.0 or
+CC BY 2.0) and polygon labels drawn over frames of the sixteen public clips; no clip is
+stored. None shows a face, a name or a record number. Nothing here performs face recognition or any other
 biometric identification, and the pipeline has no code path that could.
 
 **Data rights.** No third-party dataset is redistributed here. The one third-party
@@ -532,8 +664,10 @@ named as an open access request, not used. No AGPL-licensed model or code is pre
 AGPL-3.0 section 13 extends copyleft to network use, which a hosted demo endpoint
 triggers, and that risk is not worth taking.
 
-**Where this could do harm, and what stops it.** The realistic failure is a clinician
-trusting a millilitre figure that is wrong - from an unrecovered surface tilt, from a
+**Where this could do harm, and what stops it.** Real footage showed this happening:
+a bleeding field read as 0.00 ml and a bloodless one as 9.97 ml. The volume is now
+withheld unless its scale holds steady, and on real footage it has always been
+withheld. The realistic failure is a clinician trusting a millilitre figure that is wrong - from an unrecovered surface tilt, from a
 film depth outside the assumed range, or from blood the camera never saw. Four things
 work against it: the number is always an interval and never a point; the interval
 widens automatically as the measurement gets less reliable; the running total is

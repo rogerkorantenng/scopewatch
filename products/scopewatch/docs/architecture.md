@@ -23,33 +23,36 @@ flowchart TD
         D -->|"dark channel above 132<br/>and contrast below 22"| R2["refuse LENS_FOGGED"]
         D -->|"achromatic flat region<br/>over 55% of the field"| R3["refuse OCCLUDED"]
         D -->|"clipped pixels<br/>over 34%"| R4["refuse EXPOSURE_CLIPPED"]
+        D -->|"drapes (cool hue) or gloves<br/>(large near-white in a saturated field)"| R6["refuse OUT_OF_DOMAIN"]
         D -->|"measurable"| E["Instrument shafts<br/>HSV threshold, morphologyEx,<br/>connectedComponentsWithStats,<br/>minAreaRect, distanceTransform"]
 
         E --> F{"A shaft crossing<br/>the field edge?"}
-        F -->|no| R5["refuse NO_SCALE_REFERENCE<br/>(area fraction still reported)"]
-        F -->|yes| G["Scale<br/>5 mm / medial-axis width px<br/>= mm per pixel, with sigma"]
+        F -->|yes| G["Per-frame scale<br/>5 mm / edge-to-edge width px<br/>(saturation profiles, cv2.remap)"]
 
         E --> H["YOLOX-tiny via cv2.dnn<br/>ONNX, Apache-2.0<br/>every 10th kept frame"]
 
-        D -->|"measurable"| I["Blood segmentation<br/>redness ratio (R-G)/(R+G)<br/>AND flattened L* darkness<br/>GaussianBlur, calcHist,<br/>morphologyEx, distanceTransform"]
-        I --> J["Area in pixels<br/>pools kept by area and width"]
-        G --> K["Area in mm squared<br/>then volume interval<br/>over a 1 to 3 mm film depth"]
+        D -->|"measurable"| I["Blood segmentation<br/>Lab chroma per lightness, red hue,<br/>above the scene median;<br/>rim and dark regions not classified<br/>erode, GaussianBlur, morphologyEx"]
+        I --> J["Blood-covered share<br/>of the visible field"]
+        G --> SG{"Case scale gate<br/>present on 25% and 50 frames,<br/>varies under 25%?"}
+        SG -->|no| R5["volume CANNOT_MEASURE<br/>NO_SCALE_REFERENCE or<br/>SCALE_INCONSISTENT"]
+        SG -->|yes| K["Volume interval<br/>over a 1 to 3 mm film depth<br/>(never validated on real footage)"]
         J --> K
 
         B --> L["Camera motion<br/>cv2.phaseCorrelate<br/>on a 256 px Hanning window"]
     end
 
-    K --> M["Series: median filter,<br/>exponential moving average"]
+    J --> M["Series of the field share:<br/>median filter, EMA,<br/>gaps hold the last value"]
     L --> M
     M --> N["Rate: least squares slope<br/>over a 4 s trailing window"]
     M --> O["CUSUM, thresholds scaled<br/>from the series' own noise"]
     N --> P{"Onset?"}
     O --> P
     L --> P
-    P -->|"slope above threshold,<br/>CUSUM agrees,<br/>field not moving"| Q["Bleeding onset<br/>timestamp +/- the window"]
+    P -->|"slope above 8 %/min,<br/>CUSUM agrees, field still,<br/>no instrument change"| Q["Bleeding onset<br/>timestamp +/- the window"]
+    P -->|"otherwise"| Q2["No onset, and the reason<br/>counts the gate that stopped<br/>each candidate"]
 
     E --> S["Phase features:<br/>instrument count, shaft widths,<br/>tip motion, blood fraction"]
-    S --> T["Phase state machine<br/>with hysteresis"]
+    S --> T["Phase state machine<br/>with hysteresis<br/>(experimental; wide-device cue<br/>compares edge widths, must persist,<br/>dwell only arms it)"]
 
     Q --> U["Agent loop"]
     T --> U
@@ -67,7 +70,10 @@ The competition rules state the bar: *"image or video results must influence a
 subsequent plan, tool call, action, or request for human approval... the visual
 evidence must change what the system does next."*
 
-Three closures. Each one changes what the pipeline does, not what it prints.
+Three closures. Each one changes what the pipeline does, not what it prints. The third,
+the checkpoint, is driven by the phase model and is **off by default** since real
+footage: its width cue cannot tell a clip applier from a grasper nearer the lens. The
+state machine below runs only with `auto_checkpoint` switched on.
 
 ```mermaid
 stateDiagram-v2

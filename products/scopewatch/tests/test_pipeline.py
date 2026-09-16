@@ -262,7 +262,7 @@ def test_an_inconsistent_scale_withholds_the_volume():
         def __init__(self, mm):
             self.instruments = _I(mm)
 
-    frames = [_F(0.1 if i % 2 else 0.2) for i in range(40)]
+    frames = [_F(0.1 if i % 2 else 0.2) for i in range(80)]
     gate = scale_gate(frames)
     assert gate["passed"] is False
     assert gate["reason_code"] == "SCALE_INCONSISTENT"

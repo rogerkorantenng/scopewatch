@@ -153,9 +153,13 @@ ONSET_RATE_ML_PER_MIN = 0.35
 # SCALE_* below), so a millilitre onset detector mostly watched zeros. The field
 # fraction needs no scale: it is the share of the visible field segmented as blood,
 # in percentage points, and its rate is percentage points per minute. The threshold
-# is a sustained rise of three points a minute over the four-second window; see
-# docs/evaluation.md for the synthetic and real cases it was checked against.
-ONSET_RATE_PCT_PER_MIN = 3.0
+# is eight points a minute over the four-second window. It was first set at three,
+# which produced false onsets on two of the three scripted cases with no bleed in them
+# (an instrument leaving uncovers a pool slowly enough to outlast the instrument gate);
+# five to fifteen gave no false onset and still found all three scripted bleeds, and
+# eight sits in the middle of that range. On real footage no value in that range fires,
+# for the reason docs/evaluation.md A4 gives.
+ONSET_RATE_PCT_PER_MIN = 8.0
 ONSET_CUSUM_MIN_SIGMA_PCT = 0.02
 
 # A blood area below this share of the visible field is too small for its rate of
@@ -187,6 +191,11 @@ MOTION_SUSPECT_PX = 14.0
 #
 # The share of measurable frames that must carry a shaft scale.
 SCALE_MIN_FRAME_SHARE = 0.25
+# And an absolute floor: a scale seen on fewer frames than this (ten seconds at the
+# default stride) is a glimpse, not a case scale. Added after the one real clip that
+# passed the share and variation tests, a 9-second TEP clip with 23 scaled frames,
+# printed 0.29 ml for a field the labeller saw no blood on.
+SCALE_MIN_FRAMES = 50
 # The robust coefficient of variation (1.4826 x MAD / median) of the per-frame
 # scale across the case. Above this the "scale" is a number that wanders by more
 # than a quarter between frames, and a volume built on it would wander by half.

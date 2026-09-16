@@ -49,6 +49,7 @@ from .config import (
     REFUSAL_CODES,
     SCALE_MAX_CV,
     SCALE_MIN_FRAME_SHARE,
+    SCALE_MIN_FRAMES,
     YOLOX_SCORE,
     YOLOX_STRIDE,
     PipelineParams,
@@ -488,12 +489,13 @@ def scale_gate(frames: list[FrameResult]) -> dict[str, Any]:
     # spread; a scale that wanders is not known better than it wanders.
     sigma = max(float(np.median(sigmas)), cv * median)
     out.update({"mm_per_px": median, "mm_per_px_sigma": sigma, "robust_cv": round(cv, 4)})
-    if share < SCALE_MIN_FRAME_SHARE:
+    if share < SCALE_MIN_FRAME_SHARE or len(scales) < SCALE_MIN_FRAMES:
         return {**out, "status": "sparse", "passed": False,
                 "reason_code": "NO_SCALE_REFERENCE",
                 "reason": (f"only {len(scales)} of {len(measurable)} measurable frames "
-                           f"({share:.0%}) carried a shaft scale; "
-                           f"{SCALE_MIN_FRAME_SHARE:.0%} are needed")}
+                           f"({share:.0%}) carried a shaft scale; at least "
+                           f"{SCALE_MIN_FRAME_SHARE:.0%} and {SCALE_MIN_FRAMES} frames "
+                           "are needed")}
     if cv > SCALE_MAX_CV:
         return {**out, "status": "inconsistent", "passed": False,
                 "reason_code": "SCALE_INCONSISTENT",

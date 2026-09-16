@@ -1,4 +1,9 @@
-"""Evaluation against ground truth that is known by construction.
+"""Evaluation against ground truth that is known by construction (synthetic scenes).
+
+The evaluation on real laparoscopic footage is `scopewatch.realeval`; this module
+folds its summary (docs/real-evaluation.json) into evaluation.json under "real" so
+the service serves both. Synthetic numbers say the arithmetic is right. Only the
+real ones say anything about tissue.
 
 Run it:
 
@@ -119,6 +124,10 @@ def colour_space_trial(seeds: tuple[int, ...] = SEEDS) -> dict[str, Any]:
         "winner": winner,
         "in_use": BLOOD_COLOUR_SPACE,
         "agrees": winner == BLOOD_COLOUR_SPACE,
+        "chosen_on": (
+            "hand-labelled real frames (dev clips), not these synthetic scenes; the "
+            "synthetic winner scored precision 0 and recall 0 on the held-out real clips"
+        ),
         "seeds": list(seeds),
         "pool_sizes_px": list(POOL_SIZES),
         "distractor_px": DISTRACTOR_PX,
@@ -321,8 +330,13 @@ def case_trial(tmpdir: Path, *, seeds: tuple[int, ...] = (7, 23, 41)) -> dict[st
             write_case_video(script, path)
         record = RunRecord(product="scopewatch-eval")
         with recording(record):
+            # The automatic checkpoint is off by default; it is switched on here so the
+            # synthetic trial can still say what it does when it is used.
             result = analyse_case(
-                path, params=PipelineParams(stride=3, use_dnn=False, max_frames=400)
+                path,
+                params=PipelineParams(
+                    stride=3, use_dnn=False, max_frames=400, auto_checkpoint=True
+                ),
             )
 
         truth_onset = script.bleed_start_s
@@ -600,7 +614,8 @@ def write_plots(results: dict[str, Any], out_dir: Path) -> list[str]:
             ax.axvline(trace["truth_onset_s"], color=ink, linewidth=1.0, linestyle=":")
             ax.text(trace["truth_onset_s"] - 12.0, max(trace["smoothed"]) * 0.75,
                     f"true onset {trace['truth_onset_s']:.1f} s", color=ink, fontsize=8)
-    style(ax, "Blood on the field over one scripted case", "seconds", "millilitres")
+    style(ax, "Blood-covered field over one scripted case", "seconds",
+          "% of the visible field")
     fig.tight_layout()
     path = out_dir / "field-trace.png"
     fig.savefig(path, dpi=160, facecolor=ground)
@@ -643,6 +658,10 @@ def run_all(out_dir: Path, *, quick: bool = False) -> dict[str, Any]:
                             if (r.onset and r.onset.detected) else None),
                 "truth_onset_s": 26.0,
             }
+
+    real = out_dir / "real-evaluation.json"
+    if real.is_file():
+        results["real"] = json.loads(real.read_text(encoding="utf-8"))
 
     results["plots"] = write_plots(results, out_dir / "plots")
     results["elapsed_s"] = round(time.time() - started, 1)

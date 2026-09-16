@@ -169,16 +169,119 @@ def run_clip(path: Path, params: PipelineParams) -> dict[str, Any]:
     }
 
 
+def _visible_bleeding_match(onset_s: float | None, truth: dict[str, Any], slack_s: float) -> str:
+    """Does a detected onset fall inside a span where the labeller saw new bleeding?"""
+    spans = truth.get("new_bleeding") or []
+    if onset_s is None:
+        return "no onset; visible new bleeding noted" if spans else "no onset; none noted"
+    for span in spans:
+        if span["from_s"] - slack_s <= onset_s <= span["to_s"] + slack_s:
+            return f"inside a noted span ({span['from_s']}-{span['to_s']} s, {span['confidence']})"
+    return "not near any noted new bleeding" if spans else "fired on a clip with none noted"
+
+
+def summarise(before: Path, after: Path, truth_path: Path) -> dict[str, Any]:
+    """The before-and-after tables in docs/evaluation.md, from two run directories."""
+    truth = json.loads(truth_path.read_text(encoding="utf-8")) if truth_path.is_file() else {}
+    rows: list[dict[str, Any]] = []
+    for clip in CLIPS:
+        b_path, a_path = before / f"{clip.name}.json", after / f"{clip.name}.json"
+        if not (b_path.is_file() and a_path.is_file()):
+            continue
+        b = json.loads(b_path.read_text(encoding="utf-8"))
+        a = json.loads(a_path.read_text(encoding="utf-8"))
+        t = truth.get(clip.name, {})
+        a_gate = (a["scale"].get("gate") or {})
+        rows.append({
+            "clip": clip.name,
+            "split": clip.split,
+            "domain": clip.domain,
+            "frames": a["frames"],
+            "before": {
+                "usable": b["usable"],
+                "record_refusals": b["record_refusals"],
+                "mm_per_px": b["scale"]["mm_per_px"],
+                "implied_field_width_mm": b["scale"]["implied_field_width_mm"],
+                "peak_volume_ml": b["blood"]["peak_volume_ml"],
+                "onset_detected": b["onset"]["detected"],
+                "onset_s": b["onset"]["timestamp_s"],
+                "onset_reason": b["onset"]["reason"],
+                "checkpoint_state": b["checkpoint"]["state"],
+                "checkpoint_held_at_s": b["checkpoint"]["held_at_s"],
+                "critical_approach_from_s": b["checkpoint"]["critical_approach_from_s"],
+            },
+            "after": {
+                "usable": a["usable"],
+                "rejected_by": a["rejected_by"],
+                "record_refusals": a["record_refusals"],
+                "scale_status": a_gate.get("status"),
+                "scale_frames": (
+                    f"{a_gate.get('frames_with_scale')}/{a_gate.get('measurable_frames')}"
+                ),
+                "scale_robust_cv": a_gate.get("robust_cv"),
+                "mm_per_px": a["scale"]["mm_per_px"],
+                "implied_field_width_mm": a["scale"]["implied_field_width_mm"],
+                "peak_field_fraction": a["blood"]["peak_field_fraction"],
+                "median_field_fraction": a["blood"]["median_field_fraction"],
+                "volume_status": a["blood"]["volume_status"],
+                "volume_reason": a["blood"]["volume_reason"],
+                "peak_volume_ml": a["blood"]["peak_volume_ml"],
+                "onset_detected": a["onset"]["detected"],
+                "onset_s": a["onset"]["timestamp_s"],
+                "onset_reason": a["onset"]["reason"],
+                "onset_blocked_by": a["onset"]["blocked_by"],
+                "onset_vs_visible_bleeding": _visible_bleeding_match(
+                    a["onset"]["timestamp_s"], t, slack_s=4.0
+                ),
+                "checkpoint_if_enabled": a["checkpoint"]["state"],
+                "checkpoint_held_at_s": a["checkpoint"]["held_at_s"],
+                "critical_approach_from_s": a["checkpoint"]["critical_approach_from_s"],
+                "wide_cue": a["checkpoint"]["wide_cue"],
+            },
+            "visible_bleeding": {
+                "new_bleeding": t.get("new_bleeding"),
+                "non_laparoscopic_spans": t.get("non_laparoscopic_spans"),
+                "summary": t.get("summary"),
+            },
+        })
+    seg_before = json.loads((before / "segmentation.json").read_text(encoding="utf-8"))
+    seg_after = json.loads((after / "segmentation.json").read_text(encoding="utf-8"))
+    return {
+        "note": (
+            "No real clip has a known blood volume, so no millilitre is scored here. "
+            "Segmentation is scored against hand-drawn polygons on 64 fixed frames; "
+            "thresholds were chosen on the dev clips only."
+        ),
+        "segmentation": {
+            "before": seg_before["pixelwise"],
+            "after": seg_after["pixelwise"],
+            "before_gated": seg_before["pixelwise_on_frames_the_gates_passed"],
+            "after_gated": seg_after["pixelwise_on_frames_the_gates_passed"],
+            "frames": seg_after["frames"],
+        },
+        "clips": rows,
+    }
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
-    parser.add_argument("--media", type=Path, required=True)
+    parser.add_argument("--media", type=Path)
     parser.add_argument("--out", type=Path, required=True)
     parser.add_argument("--labels", type=Path, default=DEFAULT_LABELS)
     parser.add_argument("--clips", nargs="*", default=None)
     parser.add_argument("--skip-cases", action="store_true")
     parser.add_argument("--auto-checkpoint", action="store_true",
                         help="switch the automatic checkpoint on, to evaluate it")
+    parser.add_argument("--summarise", nargs=2, type=Path, metavar=("BEFORE", "AFTER"),
+                        help="write the before-and-after summary to --out and stop")
     args = parser.parse_args()
+    if args.summarise:
+        truth = args.labels.parent / "onset-truth.json"
+        summary = summarise(args.summarise[0], args.summarise[1], truth)
+        args.out.parent.mkdir(parents=True, exist_ok=True)
+        args.out.write_text(json.dumps(summary, indent=1), encoding="utf-8")
+        print(f"wrote {args.out}")
+        return
     args.out.mkdir(parents=True, exist_ok=True)
 
     if args.labels.is_file():

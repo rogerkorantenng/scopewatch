@@ -4,28 +4,42 @@
 **Repository: <https://github.com/rogerkorantenng/scopewatch>**
 
 Scopewatch watches the laparoscopic camera that is already in the operating room and
-measures the things a surgical team currently estimates by eye.
+measures what it can honestly measure there.
 
-It does four things, and it is careful about all four:
+**Read this before anything else.** Scopewatch was built and evaluated on synthetic
+scenes, where it worked. Then it was run on sixteen real, openly licensed surgical
+clips, and it did not: it read a bleeding field as 0.00 ml, rim shadow as 9.97 ml, and
+held its safety checkpoint on a timer. Every one of those failures has been traced to a
+cause, fixed or gated, and pinned by a test on a real frame. What it outputs has changed
+because of them. The full account is Part A of [docs/evaluation.md](docs/evaluation.md).
+**No real clip has a known blood volume, so no millilitre figure from Scopewatch has
+ever been checked against a real one.**
 
-1. **Blood on the field.** Per frame, as an area and, when there is a scale reference
-   in view, as a volume with an interval rather than a single number. Plus a running
-   total that is labelled as a lower bound, because blood that goes to suction leaves
-   the camera's field and is never counted again.
-2. **Bleeding onset.** The timestamp where the rate of change crosses a threshold,
-   found by fitting a slope over a sliding window and confirming it with a CUSUM, and
-   gated on a camera-motion estimate so a pan across an existing pool is not
-   timestamped as a haemorrhage.
-3. **Instruments and operative phase.** Instrument shafts from their colour and
-   geometry, a scale from their known 5 mm diameter, and a transparent rule-based
-   phase model over the whole clip.
-4. **A safety checkpoint.** When the phase says the irreversible step is near and no
-   safety view has been recorded, Scopewatch holds a checkpoint that a named person
-   must confirm or dismiss with a reason. Nothing resolves on a timer.
+What it does now:
 
-**Scopewatch is decision support and a retrospective measurement instrument. It is
-not a medical device, it has not been through a field trial, it has never been used
-on clinical video, and it takes no clinical action of any kind.** See
+1. **Blood-covered field.** Per frame, the share of the visible field segmented as
+   blood, and how fast that share changes. On hand-labelled frames from held-out real
+   clips the segmentation's pixel precision is 13% and its recall 11% (the old one: 0%
+   and 0%). It separates blood from shadow and from a port sleeve; it does not reliably
+   separate blood from red tissue. That number is shown next to the measurement.
+2. **Volume, usually refused.** Millilitres appear only when the instrument-shaft scale
+   is present on enough frames and steady across the case, and are labelled as never
+   validated on real footage. Otherwise the row says `CANNOT_MEASURE` and why. On all
+   sixteen real clips it says `CANNOT_MEASURE`: shafts at different distances from the
+   lens give scales that vary by 29 to 61% within a clip.
+3. **Bleeding onset.** A windowed slope on the blood-covered share, confirmed by a
+   CUSUM, gated on camera motion and instrument changes. When it does not fire, the
+   reason names the gates that stopped it. On real footage it has not fired: the camera
+   is almost never still for the fit window.
+4. **Refusals.** Focus, fog, occlusion, exposure, and now `OUT_OF_DOMAIN` for open
+   surgery, drapes and gloved hands.
+5. **An experimental safety checkpoint, off by default.** When switched on, a phase
+   model driven by instrument width can hold a checkpoint that a named person must
+   confirm or dismiss with a reason. On real video instrument width cannot tell a clip
+   applier from a grasper nearer the lens, so it is not on unless asked for.
+
+**Scopewatch is a retrospective measurement instrument. It is not a medical device, it
+has not been through a field trial, and it takes no clinical action of any kind.** See
 [docs/report.md](docs/report.md), "Responsible use".
 
 ---
@@ -41,7 +55,7 @@ it prints:
 |---|---|---|
 | The coarse pass finds a rate of change | An onset is plausible but poorly localised | Re-open the file and re-read that ten-second window at full frame rate; the dense estimate replaces the coarse one |
 | Three consecutive frames refused for fogging | The series cannot be trusted and a white-out looks like a filling field | Suppress the onset detector and raise a clean-lens request instead of an alarm |
-| Phase reaches `critical_approach` with no recorded safety view | The irreversible step is near and the checklist step is missing | Hold a checkpoint; produce no further conclusions until a named person confirms or dismisses it with a reason |
+| Phase reaches `critical_approach` with no recorded safety view (only with `auto_checkpoint` on) | The irreversible step may be near and the checklist step is missing | Hold a checkpoint; produce no further conclusions until a named person confirms or dismisses it with a reason |
 
 A clip with no bleed in it never triggers a second read. That is the test, and it is
 in `tests/test_pipeline.py::test_a_quiet_case_never_triggers_a_second_read`.
@@ -118,34 +132,39 @@ PY
 ```bash
 cd products/scopewatch
 PYTHONPATH=src ../../.venv/bin/python -m pytest tests/ -q
+../../.venv/bin/ruff check .
 ```
 
-**126 tests, all passing.** The suite asserts on numbers, not on "it ran": area error
-against an area set before the pixels existed, scale error against a shaft whose width
-we chose, onset timing against a bleed that starts on a frame we picked, and the
-refusal paths for fogging, defocus, occlusion and a missing scale reference. Several
-are regression tests for specific bugs, named after the bug: a surface vessel must not
-be counted as a pool, a settled pool must not be counted as an occlusion, a camera pan
-must not be timestamped as a haemorrhage, and a held checkpoint must survive a hundred
-further frames without resolving itself.
+**TESTCOUNT tests, all passing, and ruff clean.** The suite asserts on numbers, not on
+"it ran". `tests/test_real_footage.py` holds the regression tests from real video,
+on small credited crops in `tests/fixtures/real/`: a pooled-blood field that used to
+read as nothing, rim shadow and a port sleeve that used to read as blood, gloved hands
+that must be refused, and a wet shaft whose steel mask is half its true width. Others
+pin the onset reason naming the gate that stopped it, refusal gaps not becoming slopes,
+and ten minutes of dissection never reaching the critical approach on the dwell timer
+alone.
 
-Deselect the slow video tests with `-m "not slow"`; they generate real MP4 files and
-run the whole pipeline over them, which is most of the wall time.
+Deselect the slow video tests with `-m "not slow"`.
 
 ---
 
-## Re-run the evaluation
+## Re-run the evaluations
+
+Real footage (clips not included; `src/scopewatch/realdata.py` lists every source,
+author and licence):
 
 ```bash
-cd products/scopewatch
+PYTHONPATH=src ../../.venv/bin/python -m scopewatch.realeval --media /path/to/clips --out runs/after
+```
+
+Synthetic scenes, which also fold `docs/real-evaluation.json` into `docs/evaluation.json`:
+
+```bash
 uv pip install --python ../../.venv/bin/python "matplotlib==3.11.0"
 PYTHONPATH=src ../../.venv/bin/python -m scopewatch.evaluate --out docs
 ```
 
-That writes `docs/evaluation.json` and the plots in `docs/plots/`.
-[docs/evaluation.md](docs/evaluation.md) quotes it; if the two ever disagree, the JSON
-is right. The running service serves the same JSON at `/api/evaluation`, so the error
-bars sit next to the numbers they qualify.
+The running service serves `docs/evaluation.json` at `/api/evaluation`.
 
 ---
 
@@ -166,9 +185,9 @@ Costs and the exact resources created are in [docs/costs.md](docs/costs.md).
 
 ## Open to-do for the maintainer: dataset access
 
-**This entry has no clinical video in it and the evaluation says so on every page.**
-The published laparoscopic datasets that carry the labels Scopewatch would need sit
-behind registration forms, and the request has not been completed:
+The real-footage evaluation uses sixteen openly licensed clips with 64 hand-labelled
+frames and no known blood volumes. The published laparoscopic datasets with expert
+labels sit behind registration forms, and the request has not been completed:
 
 - **Endoscapes** — CAMMA, University of Strasbourg. Carries the critical-view-of-safety
   annotations. Licence **CC BY-NC-SA 4.0**, confirmed from the repository's own LICENSE
@@ -188,10 +207,8 @@ Three consequences to plan around before anyone relies on these:
 3. **Lead time.** The forms take days. Start the request before writing the code that
    depends on it.
 
-Until then, everything in [docs/evaluation.md](docs/evaluation.md) is measured on
-synthetic scenes generated by `scopewatch.synth`, where each quantity is set before
-the pixels exist. That is real evidence about the estimator and no evidence at all
-about tissue, and the document is explicit about the difference.
+Until then, Part A of [docs/evaluation.md](docs/evaluation.md) is the only evidence
+about real tissue, and it rests on one labeller and 64 frames.
 
 ---
 
@@ -201,7 +218,7 @@ about tissue, and the document is explicit about the difference.
 products/scopewatch/
   src/scopewatch/
     config.py        every threshold, with the reason it has that value
-    quality.py       the refusal gates: focus, fog, occlusion, exposure
+    quality.py       the refusal gates: focus, fog, occlusion, exposure, out of domain
     blood.py         segmentation, area, and area-to-volume with its uncertainty
     instruments.py   shafts, the scale they give, and the YOLOX channel
     onset.py         smoothing, camera motion, rate fitting, CUSUM
@@ -209,10 +226,13 @@ products/scopewatch/
     agent.py         perceive, decide, act, ask a person, record
     pipeline.py      the two passes and the RunRecord they produce
     synth.py         synthetic scenes whose truth is known by construction
-    evaluate.py      the seven experiments and the plots
+    evaluate.py      the synthetic experiments and the plots
+    realdata.py      the sixteen real clips, their licences, the label sample
+    realeval.py      the real-footage evaluation and its before-and-after summary
     service.py       the FastAPI app and the two checkpoint routes
   web/               the interface: dark, theatre-instrument, one signature element
-  tests/             pytest, real assertions on numbers
+  tests/             pytest, real assertions on numbers; fixtures/real has credited crops
+  eval/real/         hand-drawn blood labels and visible-bleeding notes for the real clips
   media/             the bundled sample clip and the unmeasurable one
   docs/              report, architecture, evaluation, costs, devpost, narration, deck
   infra/deploy.sh    ECR then App Runner, idempotent
