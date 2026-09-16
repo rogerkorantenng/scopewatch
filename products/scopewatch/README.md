@@ -1,5 +1,8 @@
 # Scopewatch
 
+**Live: <https://s3vrzphtvv.eu-central-1.awsapprunner.com>** — press "Run the bundled sample". No file of your own is needed.
+**Repository: <https://github.com/rogerkorantenng/scopewatch>**
+
 Scopewatch watches the laparoscopic camera that is already in the operating room and
 measures the things a surgical team currently estimates by eye.
 
@@ -147,7 +150,10 @@ bars sit next to the numbers they qualify.
 ```
 
 Builds the image from the repository root, pushes it to ECR, and creates or updates
-the App Runner service at 2 vCPU / 4 GB in `us-east-1`, tagged `Project=opencv26`.
+the App Runner service at 2 vCPU / 4 GB, tagged `Project=opencv26`. The region comes
+from `AWS_REGION` and defaults to `us-east-1`; the live service runs in `eu-central-1`
+because the account is capped at two App Runner services per region and all three US
+regions were full. See [docs/costs.md](docs/costs.md).
 Costs and the exact resources created are in [docs/costs.md](docs/costs.md).
 
 ---

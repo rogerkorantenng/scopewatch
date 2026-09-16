@@ -394,7 +394,16 @@ an instrument into view, or supply the scale directly.
 
 ## 5. AWS deployment
 
-Region us-east-1, account <aws-account-id>, everything tagged `Project=opencv26`.
+Account <aws-account-id>, region **eu-central-1**, everything tagged `Project=opencv26`.
+
+The region is a deviation from the plan and worth stating rather than burying. App
+Runner on this account is capped at two services per region, and at deploy time all
+three US regions were at that cap with other projects, so `CreateService` returned
+`InvalidRequestException: Account <aws-account-id> is restricted and can support only two
+App Runner services per region at the moment`. eu-central-1 had both slots free. For a
+US judge this costs about 100 ms of round-trip latency and nothing else, and the
+deployment script takes its region from the environment, so moving back is one command
+if a US slot frees up.
 
 - **ECR** repository `opencv26/scopewatch`. The image carries
   `opencv-python-headless==5.0.0.93`, the YOLOX-tiny ONNX file with its sha256 checked
@@ -404,6 +413,8 @@ Region us-east-1, account <aws-account-id>, everything tagged `Project=opencv26`
 - **S3** bucket `opencv26-artifacts-<aws-account-id>` under the `scopewatch/` prefix, for
   sample media and result artefacts.
 - **CloudWatch Logs** for the application and service logs.
+
+**Live at <https://s3vrzphtvv.eu-central-1.awsapprunner.com>.**
 
 The endpoint works from a cold start with no local file: the sample clip is inside the
 image and there is a button that runs it.

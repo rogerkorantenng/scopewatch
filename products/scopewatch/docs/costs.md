@@ -1,8 +1,23 @@
 # What Scopewatch costs to run
 
-Account `<aws-account-id>`, region `us-east-1`, everything tagged `Project=opencv26`
-and `Product=scopewatch`. This is the per-product detail behind the workspace
-figure in `../../../docs/costs.md`.
+Account `<aws-account-id>`, everything tagged `Project=opencv26` and
+`Product=scopewatch`. This is the per-product detail behind the workspace figure in
+`../../../docs/costs.md`.
+
+**Region, and why it is not us-east-1.** The plan was us-east-1. App Runner on this
+account is restricted to **two services per region**, and at deploy time all three
+US regions were at that cap with other projects: us-east-1 held `ugjcs-backend` and
+`cairn-v2`, us-east-2 held `opencv26-preempt` and `recourse`, and us-west-2 held
+`muster` and `gleaner`. `CreateService` returns
+`InvalidRequestException: Account <aws-account-id> is restricted and can support only
+two App Runner services per region at the moment`. eu-central-1 had both slots free
+and no other agent deploying into it, so Scopewatch runs in **Frankfurt**. The ECR
+repository and the image were rebuilt there; App Runner pulls from ECR in its own
+region. Prices below are eu-central-1's, which differ slightly from us-east-1's.
+
+For a US judge this adds roughly 100 ms of round-trip latency and nothing else. If a
+US slot frees up before judging, moving is one `AWS_REGION=us-east-1 ./infra/deploy.sh`
+away, because the script takes the region from the environment.
 
 Sizing decision on the record: Scopewatch runs at **2 vCPU / 4 GB, always on**.
 That is roughly eight times the 0.25 vCPU / 0.5 GB line the workspace plan
@@ -14,13 +29,15 @@ click into a timeout. The arithmetic below is what that choice costs.
 
 | Resource | Identifier | Created by | State |
 |---|---|---|---|
-| ECR repository | `<aws-account-id>.dkr.ecr.us-east-1.amazonaws.com/opencv26/scopewatch` | `infra/ecr.sh scopewatch --repo-only` | empty, no images pushed |
+| ECR repository, us-east-1 | `<aws-account-id>.dkr.ecr.us-east-1.amazonaws.com/opencv26/scopewatch` | `infra/ecr.sh scopewatch --repo-only` | holds the first build; unused after the region change |
+| ECR repository, eu-central-1 | `<aws-account-id>.dkr.ecr.eu-central-1.amazonaws.com/opencv26/scopewatch` | `infra/deploy.sh` with `AWS_REGION=eu-central-1` | the image the service runs |
 | S3 prefix | `s3://opencv26-artifacts-<aws-account-id>/scopewatch/` | `aws s3api put-object` | one zero-byte marker |
 | S3 bucket | `opencv26-artifacts-<aws-account-id>` | `infra/s3.sh` | pre-existing, shared by all products |
-| App Runner service | `opencv26-scopewatch` | `infra/deploy.sh` | **not created yet** |
+| App Runner service | `opencv26-scopewatch`, eu-central-1 | `infra/deploy.sh` | RUNNING at 2 vCPU / 4 GB, always on |
+| **Live URL** | **https://s3vrzphtvv.eu-central-1.awsapprunner.com** | | health check passing, OpenCV 5.0.0 on x86_64 |
 
-An empty ECR repository and a zero-byte S3 key cost nothing. Until the first
-`deploy.sh` run, Scopewatch's bill is **$0.00**.
+An empty ECR repository and a zero-byte S3 key cost nothing on their own. The two
+image copies do: see the ECR line below.
 
 ## App Runner, 2 vCPU / 4 GB
 

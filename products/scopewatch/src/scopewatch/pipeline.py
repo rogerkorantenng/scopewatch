@@ -56,6 +56,13 @@ VIDEO_SUFFIXES = {".mp4", ".mov", ".m4v", ".avi", ".mkv", ".webm"}
 # about a second of case time.
 ACTIVITY_WINDOW_FRAMES = 4
 
+# Burned into every evidence frame the product writes, because an exported frame
+# outlives the page it was exported from.
+DISCLAIMER = (
+    "Scopewatch - retrospective measurement, not intra-operative guidance. "
+    "Not a medical device."
+)
+
 ProgressFn = Callable[[float, str], None]
 EvidenceFn = Callable[[str, bytes, dict[str, Any]], str | None]
 
@@ -553,7 +560,14 @@ def _caption(fr: FrameResult) -> str:
 
 
 def annotate(image: np.ndarray, fr: FrameResult, mask: np.ndarray | None, lit: np.ndarray) -> np.ndarray:
-    """The evidence frame: the pool outlined, the shafts marked, the number written."""
+    """The evidence frame: the pool outlined, the shafts marked, the number written.
+
+    The disclaimer is burned into the pixels, not written next to them. An evidence
+    frame is the thing that leaves this product: it gets saved, pasted into a
+    presentation, attached to an email, and shown to someone who never saw the page
+    it came from. A caveat that lives in the interface does not travel with it. This
+    one does.
+    """
     out = image.copy()
     if mask is not None and mask.any():
         out = blood_mod.overlay(out, mask, PALETTE.blood)
@@ -566,12 +580,15 @@ def annotate(image: np.ndarray, fr: FrameResult, mask: np.ndarray | None, lit: n
     font = cv2.FontFace("sans") if hasattr(cv2, "FontFace") else None
     text = _caption(fr)
     colour = PALETTE.accent if not fr.measurable else PALETTE.ink
-    origin = (12, out.shape[0] - 14)
+    height = out.shape[0]
+    cv2.rectangle(out, (0, height - 52), (out.shape[1], height), PALETTE.ground, -1)
     if font is not None:
-        cv2.rectangle(out, (0, out.shape[0] - 34), (out.shape[1], out.shape[0]), PALETTE.ground, -1)
-        cv2.putText(out, text, origin, colour, font, 15)
+        cv2.putText(out, text, (12, height - 32), colour, font, 15)
+        cv2.putText(out, DISCLAIMER, (12, height - 11), PALETTE.ink_dim, font, 12)
     else:  # pragma: no cover - OpenCV 5 always has FontFace
-        cv2.putText(out, text, origin, cv2.FONT_HERSHEY_SIMPLEX, 0.5, colour, 1)
+        cv2.putText(out, text, (12, height - 32), cv2.FONT_HERSHEY_SIMPLEX, 0.5, colour, 1)
+        cv2.putText(out, DISCLAIMER, (12, height - 11), cv2.FONT_HERSHEY_SIMPLEX,
+                    0.38, PALETTE.ink_dim, 1)
     return out
 
 
