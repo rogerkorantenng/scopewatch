@@ -522,17 +522,34 @@ def write_plots(results: dict[str, Any], out_dir: Path) -> list[str]:
     written.append(path.name)
 
     # --- refusal sweeps ---
-    fig, axes = plt.subplots(1, 3, figsize=(12, 3.6), facecolor=ground)
+    # The refusal fraction and the error share an x-axis and nothing else. Past the
+    # occlusion gate the error reaches 150,000%, and on a shared linear y-axis that
+    # flattens the refusal curve - the thing the plot is about - onto the baseline.
+    # The error gets its own log axis on the right.
+    fig, axes = plt.subplots(1, 3, figsize=(12, 3.8), facecolor=ground)
     for ax, (kind, rows) in zip(axes, results["refusal"]["sweeps"].items()):
         levels = [r["level"] for r in rows]
         refused = [100.0 * r["refused_fraction"] for r in rows]
-        errs = [abs(r["area_error_pct_if_forced"].get("median", 0.0)) for r in rows]
-        ax.plot(levels, refused, color=accent, linewidth=2, marker="o", markersize=4,
-                label="refused, %")
-        ax.plot(levels, errs, color=ok, linewidth=1.6, linestyle="--", marker="s",
-                markersize=3, label="|error| if forced, %")
-        style(ax, kind, kind, "%")
-        leg = ax.legend(fontsize=8, facecolor=surface, edgecolor="#26362F")
+        errs = [max(0.05, abs(r["area_error_pct_if_forced"].get("median", 0.0)))
+                for r in rows]
+        ax.plot(levels, refused, color=accent, linewidth=2.2, marker="o", markersize=4,
+                label="refused, %", zorder=3)
+        ax.set_ylim(-4, 104)
+        style(ax, kind, kind, "refused, %")
+
+        twin = ax.twinx()
+        twin.plot(levels, errs, color=ok, linewidth=1.6, linestyle="--", marker="s",
+                  markersize=3, label="|error| if forced, %")
+        twin.set_yscale("log")
+        twin.set_ylabel("|error| if forced, % (log)", color="#9DB3AC", fontsize=8)
+        twin.tick_params(colors="#7F968F", labelsize=8)
+        twin.set_facecolor("none")
+        for spine in twin.spines.values():
+            spine.set_color("#26362F")
+
+        handles = ax.get_lines() + twin.get_lines()
+        leg = ax.legend(handles, [h.get_label() for h in handles], fontsize=8,
+                        facecolor=surface, edgecolor="#26362F", loc="center left")
         for text in leg.get_texts():
             text.set_color(ink)
     fig.tight_layout()

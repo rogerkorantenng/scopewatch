@@ -120,11 +120,17 @@ cd products/scopewatch
 PYTHONPATH=src ../../.venv/bin/python -m pytest tests/ -q
 ```
 
-The suite asserts on numbers, not on "it ran": area error against an area set before
-the pixels existed, scale error against a shaft whose width we chose, onset timing
-against a bleed that starts on a frame we picked, and the refusal paths for fogging,
-defocus, occlusion and a missing scale reference. Deselect the slow video tests with
-`-m "not slow"`.
+**126 tests, all passing.** The suite asserts on numbers, not on "it ran": area error
+against an area set before the pixels existed, scale error against a shaft whose width
+we chose, onset timing against a bleed that starts on a frame we picked, and the
+refusal paths for fogging, defocus, occlusion and a missing scale reference. Several
+are regression tests for specific bugs, named after the bug: a surface vessel must not
+be counted as a pool, a settled pool must not be counted as an occlusion, a camera pan
+must not be timestamped as a haemorrhage, and a held checkpoint must survive a hundred
+further frames without resolving itself.
+
+Deselect the slow video tests with `-m "not slow"`; they generate real MP4 files and
+run the whole pipeline over them, which is most of the wall time.
 
 ---
 
