@@ -137,7 +137,7 @@ confirmation and refuses a dismissal with no reason, and both refusals are teste
 flowchart TD
     U["Judge's browser"] -->|HTTPS| AR
 
-    subgraph AWS["AWS us-east-1, account <aws-account-id>, everything tagged Project=opencv26"]
+    subgraph AWS["AWS eu-central-1 (App Runner and ECR; S3 artefacts in us-east-1), account <aws-account-id>, everything tagged Project=opencv26"]
         AR["App Runner service<br/>scopewatch<br/>2 vCPU / 4 GB, always on<br/>x86_64 (App Runner has no ARM option)"]
         ECR["ECR repository<br/>opencv26/scopewatch<br/>image carries opencv-python-headless 5.0.0.93,<br/>the YOLOX-tiny ONNX and the sample clip"]
         S3["S3 bucket<br/>opencv26-artifacts-<aws-account-id><br/>prefix scopewatch/<br/>sample media and result artefacts"]
