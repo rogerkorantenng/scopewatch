@@ -18,9 +18,10 @@ the first, which is the one that matters.
 from __future__ import annotations
 
 import time
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Callable
+from typing import Any
 
 import cv2
 import numpy as np
@@ -42,8 +43,12 @@ from . import quality as quality_mod
 from .agent import ACTION_RESCAN, AgentLoop, Observation
 from .config import (
     BLOOD_COLOUR_SPACE,
+    DOMAIN_CLIP_SHARE,
+    ONSET_CUSUM_MIN_SIGMA_PCT,
     PALETTE,
     REFUSAL_CODES,
+    SCALE_MAX_CV,
+    SCALE_MIN_FRAME_SHARE,
     YOLOX_SCORE,
     YOLOX_STRIDE,
     PipelineParams,
@@ -115,6 +120,9 @@ class CaseResult:
     mm_per_px: float | None = None
     mm_per_px_sigma: float = 0.0
     scale_source: str = "none"
+    scale_gate: dict[str, Any] = field(default_factory=dict)
+    peak_field_fraction: float | None = None
+    median_field_fraction: float | None = None
     rescanned: bool = False
     video: dict[str, Any] = field(default_factory=dict)
     runner: phase_mod.PhaseRunner = field(default_factory=phase_mod.PhaseRunner)
@@ -176,19 +184,16 @@ def process_frame(
 
     activity = instrument_activity(steel, previous_steel)
 
+    # The blood is measured as a share of the visible field, which needs no scale.
+    # Millilitres are added later, over the whole case, and only if the case's scale
+    # passes `scale_gate`; a frame is never refused for want of a scale any more.
     measurement, mask = blood_mod.measure(
         image,
         lit,
         method=BLOOD_COLOUR_SPACE,
-        mm_per_px=reading.mm_per_px,
-        mm_per_px_sigma=reading.mm_per_px_sigma,
-        depth_mm=params.film_depth_mm,
-        depth_low_mm=params.film_depth_low_mm,
-        depth_high_mm=params.film_depth_high_mm,
         scale_source=reading.scale_source,
     )
 
-    refusal = None if measurement.measured else "NO_SCALE_REFERENCE"
     return (
         FrameResult(
             index=frame.index,
@@ -198,7 +203,7 @@ def process_frame(
             blood=measurement,
             motion_px=motion_px,
             tip_motion_px=activity,
-            refusal=refusal,
+            refusal=None,
             steel=steel,
         ),
         mask,
@@ -349,8 +354,10 @@ def _pass(
     expected = params.max_frames or 400
     started = time.perf_counter()
 
-    for n, frame in enumerate(_frames(path, params, stride=stride, start_ms=start_ms, end_ms=end_ms)):
+    frames = _frames(path, params, stride=stride, start_ms=start_ms, end_ms=end_ms)
+    for n, frame in enumerate(frames):
         shift = motion.update(frame.image)
+        result.video["analysed_long_side"] = int(max(frame.image.shape[:2]))
         run_dnn = bool(params.use_dnn and detector is not None and n % YOLOX_STRIDE == 0)
         fr, mask, lit = process_frame(
             frame,
@@ -394,29 +401,30 @@ def _observe(
             phase=provisional,
             measurable=fr.measurable,
             refusal=fr.refusal,
-            volume_ml=fr.blood.volume_ml if fr.blood else None,
+            volume_ml=None,
             onset=False,  # set in _finish, once the series exists
             safety_view_established=params.safety_view_established,
             evidence_uri=uri,
+            checkpoint_enabled=params.auto_checkpoint,
         )
     )
 
 
 def _feature_for(result: CaseResult, fr: FrameResult) -> phase_mod.PhaseFeatures:
-    """One frame's phase features, with a running median of the shaft widths.
+    """One frame's phase features.
 
-    The median is over every shaft seen so far in this case, which is what makes
-    "a wide device just entered" mean anything: it is wide relative to the
-    instruments this operation has been using, not relative to a fixed number of
-    pixels that depends on how close the scope happens to be.
+    The wide-device cue compares edge-to-edge widths of separate instruments in this
+    frame, not this frame's widest mask width against a running median of every
+    width seen so far; `phase.py` has the history of why.
     """
-    widths = [s.width_px for s in fr.instruments.shafts]
-    result.width_samples.extend(widths)
-    median_width = float(np.median(result.width_samples)) if result.width_samples else 0.0
-    # The wide-device cue reads the 95th percentile of the medial-axis widths, not
-    # the median, because when a clip applier crosses a grasper the two merge into
-    # one component and only the upper tail of the width distribution sees it.
-    peaks = [s.width_p95_px for s in fr.instruments.shafts]
+    widths = instruments_mod.frame_widths(fr.instruments.shafts)
+    history = result.width_samples
+    usual = float(np.median(history)) if history else 0.0
+    samples = len(history)
+    if fr.measurable:
+        # Only widths that are not themselves wide join the history, so a device that
+        # stays in view does not become the usual width.
+        history.extend(w for w in widths if not usual or w < 1.4 * usual or samples < 20)
     # "Has it moved recently", not "is it moving in this instant". A grasper sweeping
     # back and forth is momentarily stationary at each end of the sweep, and an
     # instantaneous churn reading dips to nothing there. The running maximum over the
@@ -427,12 +435,73 @@ def _feature_for(result: CaseResult, fr: FrameResult) -> phase_mod.PhaseFeatures
     return phase_mod.PhaseFeatures(
         timestamp_ms=fr.timestamp_ms,
         instrument_count=fr.instruments.count,
-        max_shaft_width_px=max(peaks) if peaks else 0.0,
-        median_shaft_width_px=median_width,
+        widest_px=widths[-1] if widths else 0.0,
+        narrowest_px=widths[0] if widths else 0.0,
+        widths_in_frame=len(widths),
+        usual_width_px=usual,
+        usual_width_samples=samples,
         blood_fraction=fr.blood.area_fraction if fr.blood else 0.0,
         tip_motion_px=activity,
         measurable=fr.measurable,
     )
+
+
+def scale_gate(frames: list[FrameResult]) -> dict[str, Any]:
+    """Decide, over the whole case, whether its shaft scale can carry a volume.
+
+    Two tests, both stated in config.py. Enough measurable frames must carry a shaft
+    scale, and the per-frame scale must not wander: its robust coefficient of
+    variation must stay under SCALE_MAX_CV. The second is the one real footage fails.
+    A shaft's apparent width moves with its distance from the lens, and the tissue
+    the blood lies on is at yet another distance, so a scale that jumps by a third
+    between frames is not a property of the field.
+    """
+    measurable = [f for f in frames if f.measurable]
+    operator = [f for f in measurable if f.instruments.scale_source == "operator"]
+    if operator:
+        mm = float(operator[0].instruments.mm_per_px or 0.0)
+        return {
+            "status": "operator", "passed": True, "mm_per_px": mm, "mm_per_px_sigma": 0.0,
+            "frames_with_scale": len(operator), "measurable_frames": len(measurable),
+            "frame_share": 1.0, "robust_cv": 0.0, "reason_code": None,
+            "reason": "the operator supplied millimetres per pixel",
+        }
+    scales = [f.instruments.mm_per_px for f in measurable if f.instruments.mm_per_px]
+    share = len(scales) / len(measurable) if measurable else 0.0
+    out: dict[str, Any] = {
+        "frames_with_scale": len(scales),
+        "measurable_frames": len(measurable),
+        "frame_share": round(share, 4),
+        "min_frame_share": SCALE_MIN_FRAME_SHARE,
+        "max_robust_cv": SCALE_MAX_CV,
+    }
+    if not scales:
+        return {**out, "status": "none", "passed": False, "mm_per_px": None,
+                "mm_per_px_sigma": 0.0, "robust_cv": None,
+                "reason_code": "NO_SCALE_REFERENCE",
+                "reason": "no frame carried a measurable instrument shaft"}
+    arr = np.asarray(scales, dtype=np.float64)
+    median = float(np.median(arr))
+    cv = float(1.4826 * np.median(np.abs(arr - median)) / median) if median > 0 else 1.0
+    sigmas = [f.instruments.mm_per_px_sigma for f in measurable if f.instruments.mm_per_px]
+    # The case sigma is the larger of the typical per-frame sigma and the case's own
+    # spread; a scale that wanders is not known better than it wanders.
+    sigma = max(float(np.median(sigmas)), cv * median)
+    out.update({"mm_per_px": median, "mm_per_px_sigma": sigma, "robust_cv": round(cv, 4)})
+    if share < SCALE_MIN_FRAME_SHARE:
+        return {**out, "status": "sparse", "passed": False,
+                "reason_code": "NO_SCALE_REFERENCE",
+                "reason": (f"only {len(scales)} of {len(measurable)} measurable frames "
+                           f"({share:.0%}) carried a shaft scale; "
+                           f"{SCALE_MIN_FRAME_SHARE:.0%} are needed")}
+    if cv > SCALE_MAX_CV:
+        return {**out, "status": "inconsistent", "passed": False,
+                "reason_code": "SCALE_INCONSISTENT",
+                "reason": (f"the shaft scale varied by {cv:.0%} (robust CV) across the "
+                           f"case; a volume needs it under {SCALE_MAX_CV:.0%}")}
+    return {**out, "status": "consistent", "passed": True, "reason_code": None,
+            "reason": (f"shaft scale on {share:.0%} of measurable frames, "
+                       f"varying {cv:.0%}")}
 
 
 def _finish(result: CaseResult, params: PipelineParams) -> None:
@@ -443,8 +512,11 @@ def _finish(result: CaseResult, params: PipelineParams) -> None:
 
     with stage("series"):
         times = [f.timestamp_ms for f in frames]
-        volumes = [
-            (f.blood.volume_ml if (f.blood and f.blood.volume_ml is not None) else 0.0)
+        # Percentage points of the visible field. Unmeasurable frames carry no value;
+        # `onset.analyse` holds the last measured value across them rather than
+        # dropping to zero, which is what used to manufacture slopes.
+        fractions = [
+            (f.blood.area_fraction * 100.0 if (f.blood and f.measurable) else 0.0)
             for f in frames
         ]
         measurable = [f.measurable for f in frames]
@@ -453,36 +525,57 @@ def _finish(result: CaseResult, params: PipelineParams) -> None:
         reliable = [bool(f.blood and f.blood.reliable) for f in frames]
         series, onset = onset_mod.analyse(
             times,
-            volumes,
+            fractions,
             motion_px=motion,
             measurable=measurable,
             instruments=counts,
             reliable=reliable,
-            threshold=params.onset_rate_ml_per_min,
+            threshold=params.onset_rate_pct_per_min,
+            unit="%/min",
+            cusum_min_sigma=ONSET_CUSUM_MIN_SIGMA_PCT,
         )
         result.series = series
         result.onset = onset
-        result.cumulative_observed_ml = onset_mod.cumulative_observed_loss(times, volumes)
 
     with stage("phase"):
         result.phases = result.runner.finish()
 
-    measured = [f for f in frames if f.blood and f.blood.volume_ml is not None]
+    measured = [f for f in frames if f.blood and f.measurable]
     if measured:
-        peak = max(measured, key=lambda f: f.blood.volume_ml or 0.0)
-        result.peak_volume_ml = peak.blood.volume_ml
-        result.peak_volume_low_ml = peak.blood.volume_ml_low
-        result.peak_volume_high_ml = peak.blood.volume_ml_high
-        scales = [f.instruments.mm_per_px for f in measured if f.instruments.mm_per_px]
-        if scales:
-            result.mm_per_px = float(np.median(scales))
-            result.mm_per_px_sigma = float(np.median(
-                [f.instruments.mm_per_px_sigma for f in measured if f.instruments.mm_per_px]
-            ))
-            result.scale_source = measured[0].instruments.scale_source
+        values = [f.blood.area_fraction for f in measured if f.blood]
+        result.peak_field_fraction = float(max(values))
+        result.median_field_fraction = float(np.median(values))
 
-    # Now that the onset is known, replay it into the loop so the rescan and the
-    # checkpoint see it. This is the only place `onset=True` is ever set.
+    # Millilitres, only when the case's scale can carry them.
+    gate = scale_gate(frames)
+    result.scale_gate = gate
+    result.mm_per_px = gate.get("mm_per_px")
+    result.mm_per_px_sigma = float(gate.get("mm_per_px_sigma") or 0.0)
+    result.scale_source = (
+        "operator" if gate.get("status") == "operator"
+        else "instrument_shaft" if gate.get("mm_per_px") else "none"
+    )
+    if gate.get("passed") and measured and result.mm_per_px:
+        volumes: list[float] = []
+        for f in frames:
+            if f.blood and f.measurable:
+                f.blood = blood_mod.with_volume(
+                    f.blood, result.mm_per_px, result.mm_per_px_sigma,
+                    depth_mm=params.film_depth_mm, depth_low_mm=params.film_depth_low_mm,
+                    depth_high_mm=params.film_depth_high_mm, scale_source=result.scale_source,
+                )
+            volumes.append(
+                f.blood.volume_ml if (f.blood and f.blood.volume_ml is not None) else 0.0
+            )
+        peak = max(measured, key=lambda f: f.blood.volume_ml or 0.0 if f.blood else 0.0)
+        if peak.blood:
+            result.peak_volume_ml = peak.blood.volume_ml
+            result.peak_volume_low_ml = peak.blood.volume_ml_low
+            result.peak_volume_high_ml = peak.blood.volume_ml_high
+        result.cumulative_observed_ml = onset_mod.cumulative_observed_loss(times, volumes)
+
+    # Now that the onset is known, replay it into the loop so the rescan sees it.
+    # This is the only place `onset=True` is ever set.
     if result.onset and result.onset.detected and result.onset.index is not None:
         i = min(result.onset.index, len(frames) - 1)
         fr = frames[i]
@@ -494,8 +587,10 @@ def _finish(result: CaseResult, params: PipelineParams) -> None:
                 measurable=fr.measurable,
                 refusal=fr.refusal,
                 volume_ml=fr.blood.volume_ml if fr.blood else None,
+                field_fraction=fr.blood.area_fraction if fr.blood else None,
                 onset=True,
                 safety_view_established=params.safety_view_established,
+                checkpoint_enabled=params.auto_checkpoint,
             )
         )
 
@@ -550,16 +645,13 @@ def _caption(fr: FrameResult) -> str:
     if not fr.measurable:
         return f"{fr.refusal}: {REFUSAL_CODES.get(fr.refusal or '', 'not measurable')}"
     b = fr.blood
-    if b and b.volume_ml is not None:
-        return (
-            f"{b.volume_ml:.2f} ml on the field "
-            f"({b.volume_ml_low:.2f} to {b.volume_ml_high:.2f}), "
-            f"{fr.instruments.count} instrument(s)"
-        )
-    return f"{(b.area_fraction * 100) if b else 0:.2f}% of the field, no scale reference"
+    share = (b.area_fraction * 100) if b else 0.0
+    return f"{share:.1f}% of the visible field segmented as blood"
 
 
-def annotate(image: np.ndarray, fr: FrameResult, mask: np.ndarray | None, lit: np.ndarray) -> np.ndarray:
+def annotate(
+    image: np.ndarray, fr: FrameResult, mask: np.ndarray | None, lit: np.ndarray
+) -> np.ndarray:
     """The evidence frame: the pool outlined, the shafts marked, the number written.
 
     The disclaimer is burned into the pixels, not written next to them. An evidence
@@ -600,6 +692,8 @@ def annotate(image: np.ndarray, fr: FrameResult, mask: np.ndarray | None, lit: n
 def to_record(result: CaseResult, record: RunRecord, params: PipelineParams) -> RunRecord:
     """Fill a visioncore RunRecord from a CaseResult. This is the service's contract."""
     record.params.update(params.to_dict())
+    gate = result.scale_gate or {}
+    volume_measured = result.peak_volume_ml is not None
     record.metrics.update(
         {
             "frames_analysed": len(result.frames),
@@ -609,8 +703,19 @@ def to_record(result: CaseResult, record: RunRecord, params: PipelineParams) -> 
                 "mm_per_px_sigma": round(result.mm_per_px_sigma, 5),
                 "source": result.scale_source,
                 "assumed_shaft_mm": params.shaft_mm,
+                "gate": _rounded(gate),
+                "implied_field_width_mm": _field_width_mm(result),
             },
             "blood": {
+                "primary": "field_fraction",
+                "peak_field_fraction": _r(result.peak_field_fraction, 5),
+                "median_field_fraction": _r(result.median_field_fraction, 5),
+                "volume": {
+                    "status": "MEASURED" if volume_measured else "CANNOT_MEASURE",
+                    "reason_code": None if volume_measured else gate.get("reason_code"),
+                    "reason": gate.get("reason", "no measurable frame"),
+                    "validated_on_real_footage": False,
+                },
                 "peak_volume_ml": _r(result.peak_volume_ml),
                 "peak_volume_low_ml": _r(result.peak_volume_low_ml),
                 "peak_volume_high_ml": _r(result.peak_volume_high_ml),
@@ -622,70 +727,108 @@ def to_record(result: CaseResult, record: RunRecord, params: PipelineParams) -> 
             "onset": result.onset.to_dict() if result.onset else None,
             "rescanned": result.rescanned,
             "phases": result.phases.to_dict(),
+            "checkpoint": {
+                "automatic": params.auto_checkpoint,
+                "status": "enabled" if params.auto_checkpoint else "disabled",
+                "note": (
+                    "Experimental. The cue is instrument width, which on real video "
+                    "cannot tell a clip applier from a grasper nearer the lens."
+                ),
+            },
             "agent": result.loop.to_dict(),
             "video": result.video,
             "series": result.series.to_dict() if result.series else None,
+            "series_unit": "percent of the visible field",
         }
     )
 
-    if result.ledger.total and result.ledger.usable == 0:
+    rejected = result.ledger.to_dict()["rejected_by"]
+    out_of_domain = rejected.get("OUT_OF_DOMAIN", 0) >= DOMAIN_CLIP_SHARE * max(
+        1, result.ledger.total
+    )
+    if result.ledger.total and result.ledger.usable == 0 and not out_of_domain:
         record.refuse(
-            "NO_USABLE_FRAMES",
-            REFUSAL_CODES["NO_USABLE_FRAMES"],
-            rejected_by=result.ledger.to_dict()["rejected_by"],
+            "NO_USABLE_FRAMES", REFUSAL_CODES["NO_USABLE_FRAMES"], rejected_by=rejected
         )
-    elif result.peak_volume_ml is None:
+    elif out_of_domain:
         record.refuse(
-            "NO_SCALE_REFERENCE",
-            REFUSAL_CODES["NO_SCALE_REFERENCE"],
-            hint=(
-                "Bring an instrument shaft into view, or set the scale directly if "
-                "you know the millimetres per pixel."
+            "OUT_OF_DOMAIN",
+            REFUSAL_CODES["OUT_OF_DOMAIN"],
+            rejected_by=rejected,
+            hint="Scopewatch reads laparoscopic video from inside the abdomen only.",
+            share_of_frames=round(
+                rejected.get("OUT_OF_DOMAIN", 0) / max(1, result.ledger.total), 3
             ),
-            area_fraction_still_reported=True,
         )
-
-    for frame_result in result.frames:
-        if frame_result.refusal and frame_result.refusal != "NO_SCALE_REFERENCE":
-            continue
     record.results = _results(result, params)
     return record
 
 
+def _field_width_mm(result: CaseResult) -> float | None:
+    """The scale times the analysed frame's long side: a sanity number, not a claim."""
+    if not result.mm_per_px or not result.frames:
+        return None
+    width = result.video.get("width") or 0
+    height = result.video.get("height") or 0
+    side = max(width, height)
+    if not side:
+        return None
+    # The scale is in analysed pixels, and frames are analysed at no more than max_side.
+    analysed = int(result.video.get("analysed_long_side") or side)
+    return round(result.mm_per_px * analysed, 1)
+
+
+def _rounded(d: dict[str, Any]) -> dict[str, Any]:
+    return {k: (round(v, 5) if isinstance(v, float) else v) for k, v in d.items()}
+
+
 def _results(result: CaseResult, params: PipelineParams) -> list[dict[str, Any]]:
-    """The headline rows: what the KPI band shows, each with its uncertainty."""
+    """The headline rows: what the KPI band shows, each with what qualifies it."""
     rows: list[dict[str, Any]] = []
+    measured_any = result.peak_field_fraction is not None
     rows.append(
         {
-            "label": "Blood on the field, peak",
-            "value": _r(result.peak_volume_ml),
-            "low": _r(result.peak_volume_low_ml),
-            "high": _r(result.peak_volume_high_ml),
-            "unit": "ml",
-            "measured": result.peak_volume_ml is not None,
-            "note": (
-                f"area x assumed film depth {params.film_depth_low_mm}-"
-                f"{params.film_depth_high_mm} mm"
-            ),
-        }
-    )
-    # A cumulative total of 0.00 ml is a number, and on a clip where nothing was
-    # measurable it is a lie told in the right units. The total only counts as
-    # measured when at least one frame produced a volume to add up.
-    measured_any = any(f.blood and f.blood.volume_ml is not None for f in result.frames)
-    rows.append(
-        {
-            "label": "Cumulative observed loss",
-            "value": _r(result.cumulative_observed_ml) if measured_any else None,
-            "unit": "ml",
+            "label": "Blood-covered field, peak",
+            "value": _r(result.peak_field_fraction * 100.0, 2) if measured_any else None,
+            "unit": "%",
             "measured": measured_any,
             "note": (
-                "lower bound; suctioned and soaked blood leaves the field uncounted"
-                if measured_any
-                else "no frame in this clip produced a volume to add up"
+                "share of the visible field segmented as blood; the segmentation's "
+                "precision and recall on hand-labelled real frames are in the evaluation"
+                if measured_any else "no frame in this clip passed the gates"
             ),
         }
     )
+    gate = result.scale_gate or {}
+    if result.peak_volume_ml is not None:
+        rows.append(
+            {
+                "label": "Blood on the field, volume",
+                "value": _r(result.peak_volume_ml),
+                "low": _r(result.peak_volume_low_ml),
+                "high": _r(result.peak_volume_high_ml),
+                "unit": "ml",
+                "measured": True,
+                "status": "MEASURED",
+                "note": (
+                    f"peak; area x assumed film depth {params.film_depth_low_mm}-"
+                    f"{params.film_depth_high_mm} mm at a {gate.get('status', '')} scale. "
+                    "Not validated on real footage: no real clip has a known volume"
+                ),
+            }
+        )
+    else:
+        rows.append(
+            {
+                "label": "Blood on the field, volume",
+                "value": None,
+                "unit": "ml",
+                "measured": False,
+                "status": "CANNOT_MEASURE",
+                "reason_code": gate.get("reason_code"),
+                "note": f"CANNOT_MEASURE: {gate.get('reason', 'no measurable frame')}",
+            }
+        )
     if result.onset:
         rows.append(
             {
@@ -718,10 +861,14 @@ def _results(result: CaseResult, params: PipelineParams) -> list[dict[str, Any]]
     rows.append(
         {
             "label": "Safety checkpoint",
-            "value": result.loop.state,
+            "value": result.loop.state if params.auto_checkpoint else "off",
             "unit": "",
-            "measured": True,
-            "note": checkpoint.question if checkpoint else "no checkpoint was raised",
+            "measured": params.auto_checkpoint,
+            "note": (
+                checkpoint.question if checkpoint
+                else "experimental; raised only when the automatic checkpoint is switched on"
+                if not params.auto_checkpoint else "no checkpoint was raised"
+            ),
         }
     )
     return rows

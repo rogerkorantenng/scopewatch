@@ -18,7 +18,7 @@ every volume Scopewatch reports is the interval that range produces, never a poi
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from typing import Any
 
 import cv2
@@ -30,9 +30,9 @@ from .config import (
     FILM_DEPTH_MM_LOW,
     FILM_DEPTH_MM_NOMINAL,
     LAB_A_MIN,
-    LAB_L_PERCENTILE,
     MIN_POOL_AREA_PX,
     MIN_POOL_WIDTH_PX,
+    MIN_RELIABLE_FIELD_FRACTION,
     MORPH_KERNEL,
     SPECULAR_S_MAX,
     SPECULAR_V_MIN,
@@ -295,7 +295,9 @@ def _darker_than_tissue(
     return min(median - k * max(mad, 1.0), median - DARKNESS_MIN_LEVELS)
 
 
-def illumination_field(channel: np.ndarray, valid: np.ndarray, *, sigma_fraction: float = 0.22) -> np.ndarray:
+def illumination_field(
+    channel: np.ndarray, valid: np.ndarray, *, sigma_fraction: float = 0.22
+) -> np.ndarray:
     """A very low-frequency estimate of how the scope is lighting the field.
 
     A laparoscope's light source sits at the tip of the scope, a few centimetres
@@ -436,6 +438,127 @@ def segment_ratio_dark(image: np.ndarray, valid: np.ndarray) -> np.ndarray:
     return _clean((red & (flat <= cut)).astype(np.uint8))
 
 
+# ---------------------------------------------------------------------------
+# Candidate 7, and the one in use: chroma, hue and lightness, against the scene
+# ---------------------------------------------------------------------------
+
+# Every constant below was chosen on the `dev` clips of the hand-labelled real frames
+# (scopewatch.realdata) and none on the `test` clips; docs/evaluation.md gives the
+# grids, the dev score each one reached and the test score it then produced.
+CHROMA_APERTURE_MARGIN = 0.02  # erode the lit field by this share of the long side
+CHROMA_ILLUMINATION_MIN = 0.35  # of the field's median lightness, after heavy blur
+CHROMA_MIN = 35.0  # CIE Lab chroma, sqrt(a*^2 + b*^2)
+CHROMA_PER_LIGHTNESS_MIN = 1.0  # chroma / L*: deep colour for its lightness
+CHROMA_HUE_DEG = (8.0, 50.0)  # Lab hue angle: red, not magenta, not orange-yellow
+CHROMA_L_MAX = 55.0  # L* on 0..100: not bright pink tissue
+SCENE_CHROMA_RATIO = 1.35  # chroma / L* at least this multiple of the scene median
+SCENE_HUE_SLACK_DEG = 3.0  # hue no more than this above the scene median hue
+CHROMA_MIN_COMPONENT = 0.004  # a region smaller than this share of the field is dropped
+
+
+def _lab_float(image: np.ndarray) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
+    """L* on 0..100, chroma, hue angle in degrees, and chroma per unit lightness."""
+    lab = cv2.cvtColor(image, cv2.COLOR_BGR2Lab).astype(np.float32)
+    lightness = lab[:, :, 0] * (100.0 / 255.0)
+    a_star = lab[:, :, 1] - 128.0
+    b_star = lab[:, :, 2] - 128.0
+    chroma = cv2.magnitude(a_star, b_star)
+    hue = np.degrees(np.arctan2(b_star, a_star))
+    return lightness, chroma, hue, chroma / np.maximum(lightness, 1.0)
+
+
+def aperture_core(field: np.ndarray, *, margin: float = CHROMA_APERTURE_MARGIN) -> np.ndarray:
+    """The lit field with its rim taken off.
+
+    The rim of a laparoscope's circle is where the image is darkest, most vignetted
+    and most distorted, and on the Barroso hernia clip it is where shadowed
+    peritoneum was measured as 9.97 ml of blood. A band of the long side is removed.
+    """
+    h, w = field.shape[:2]
+    r = max(1, round(margin * max(h, w)))
+    kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (2 * r + 1, 2 * r + 1))
+    return cv2.erode(field.astype(np.uint8), kernel)
+
+
+def lit_enough(lightness: np.ndarray, core: np.ndarray, *,
+               floor: float = CHROMA_ILLUMINATION_MIN) -> np.ndarray:
+    """Pixels whose neighbourhood is lit to at least `floor` of the field's median.
+
+    A heavy blur of L* over the whole frame, black surround included, so the falloff
+    toward the rim and any deep shadow reads as dark. Colour in a region that dark is
+    mostly noise and compression, and it is not classified at all.
+    """
+    h, w = lightness.shape[:2]
+    small = (max(8, w // 8), max(8, h // 8))
+    shrunk = cv2.resize(lightness, small, interpolation=cv2.INTER_AREA)
+    blurred = cv2.GaussianBlur(shrunk, (0, 0), max(1.0, 0.06 * max(small)))
+    illumination = cv2.resize(blurred, (w, h), interpolation=cv2.INTER_LINEAR)
+    sel = core.astype(bool)
+    median = float(np.median(lightness[sel])) if sel.any() else 50.0
+    return illumination >= floor * median
+
+
+def segment_chroma_scene(image: np.ndarray, valid: np.ndarray) -> np.ndarray:
+    """Candidate 7: saturated red for its lightness, and redder than this scene.
+
+    This replaced `ratio_dark` after real footage, and the reasons are specific.
+
+    `ratio_dark` asked for pixels far above the *tissue mode* in redness and darker
+    than the tissue around them. On a field where blood is a large share of the view
+    (the WSES ulcer repair) the redness mode is partly blood and a lighting-flattened
+    pool is no darker than its neighbours, so a bleeding field read 0.00 ml on 555 of
+    561 frames. And "darker than its surroundings" is exactly what vignetting and rim
+    shadow are, which is how shadowed peritoneum at the edge of the Barroso clip
+    became 9.97 ml.
+
+    This decision does not use darkness as evidence of blood at all. It uses chroma
+    per unit lightness: blood is deeply coloured for how light it is, while shadow is
+    dark *and* grey, and pink perfused tissue is coloured but light. The hue must be
+    red, and on top of those absolute tests the pixel must be more saturated than the
+    scene's own median by SCENE_CHROMA_RATIO, because under a warm light source a
+    whole field of bowel or muscle can pass the absolute tests (the Kavalakat and TEP
+    clips). The rim is removed and badly lit regions are not classified.
+
+    Specular highlights on wet blood are near-white and fail every colour test, so a
+    highlight that sits inside or against a blood region is filled back in.
+
+    What it still cannot do, measured on held-out real clips: separate blood from
+    red tissue that is as saturated as blood relative to its scene. Its pixel
+    precision there is low; docs/evaluation.md has the numbers.
+    """
+    lightness, chroma, hue, per_l = _lab_float(image)
+    core = cv2.bitwise_and(aperture_core(valid), valid.astype(np.uint8)).astype(bool)
+    if core.sum() < 256:
+        return np.zeros(image.shape[:2], np.uint8)
+    lit = lit_enough(lightness, core)
+    median_per_l = float(np.median(per_l[core]))
+    median_hue = float(np.median(hue[core]))
+    colour = (
+        (chroma >= CHROMA_MIN)
+        & (hue >= CHROMA_HUE_DEG[0]) & (hue <= CHROMA_HUE_DEG[1])
+        & (per_l >= CHROMA_PER_LIGHTNESS_MIN)
+        & (lightness <= CHROMA_L_MAX)
+    )
+    scene = (per_l >= SCENE_CHROMA_RATIO * median_per_l) & (hue <= median_hue + SCENE_HUE_SLACK_DEG)
+    mask = (colour & scene & core & lit).astype(np.uint8)
+
+    factor = max(image.shape[:2]) / 960.0
+    k = max(3, round(MORPH_KERNEL * factor) | 1)
+    kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (k, k))
+    mask = cv2.morphologyEx(mask, cv2.MORPH_OPEN, kernel)
+    spec = specular_mask(image).astype(bool)
+    near = cv2.dilate(mask, kernel).astype(bool)
+    mask = (mask.astype(bool) | (spec & near & core)).astype(np.uint8)
+    mask = cv2.morphologyEx(mask, cv2.MORPH_CLOSE, kernel)
+
+    count, labels, stats, _ = cv2.connectedComponentsWithStats(mask, 8)
+    if count <= 1:
+        return np.zeros(mask.shape, np.uint8)
+    keep = np.zeros(count, bool)
+    keep[1:] = stats[1:, cv2.CC_STAT_AREA] >= CHROMA_MIN_COMPONENT * core.sum()
+    return (keep[labels] & core).astype(np.uint8)
+
+
 SEGMENTERS = {
     "hsv": segment_hsv,
     "lab_a": segment_lab_a,
@@ -443,6 +566,7 @@ SEGMENTERS = {
     "ratio": segment_ratio,
     "lab_ad": segment_lab_ad,
     "ratio_dark": segment_ratio_dark,
+    "chroma_scene": segment_chroma_scene,
 }
 
 
@@ -457,6 +581,13 @@ def blood_mask(
         raise ValueError(f"unknown segmentation method {method!r}; have {sorted(SEGMENTERS)}")
     h, w = image.shape[:2]
     field = np.ones((h, w), np.uint8) if field is None else field.astype(np.uint8)
+    if method == "chroma_scene":
+        # The fraction is taken against the part of the field this method classifies:
+        # the aperture without its rim. Speculars stay in, because a highlight inside a
+        # pool is filled back in as blood.
+        with stage(f"segment:{method}"):
+            mask = SEGMENTERS[method](image, field)
+        return mask, aperture_core(field)
     valid = cv2.bitwise_and(field, 1 - specular_mask(image))
     with stage(f"segment:{method}"):
         mask = SEGMENTERS[method](image, valid)
@@ -541,27 +672,51 @@ def measure(
     without a scale is not.
     """
     mask, valid = blood_mask(image, field, method=method)
-    mask, pools, largest = drop_small_pools(mask)
+    # Both floors were set on 960-pixel frames; see instruments.resolution_factor.
+    factor = max(image.shape[:2]) / 960.0
+    mask, pools, largest = drop_small_pools(
+        mask,
+        max(12, round(MIN_POOL_AREA_PX * factor * factor)),
+        min_width_px=max(3.0, MIN_POOL_WIDTH_PX * factor),
+    )
+    # (for chroma_scene the component floor above is already met by construction; the
+    # width test still removes vessel-like lines)
 
     area_px = int(mask.sum())
     field_px = int(valid.sum())
     fraction = area_px / field_px if field_px else 0.0
     spec_px = int(specular_mask(image).sum())
 
+    base = BloodMeasurement(
+        area_px=area_px,
+        field_px=field_px,
+        area_fraction=fraction,
+        pools=pools,
+        largest_pool_px=largest,
+        specular_px=spec_px,
+        scale_source=scale_source,
+        reliable=fraction >= MIN_RELIABLE_FIELD_FRACTION,
+    )
     if mm_per_px is None or mm_per_px <= 0:
-        return (
-            BloodMeasurement(
-                area_px=area_px,
-                field_px=field_px,
-                area_fraction=fraction,
-                pools=pools,
-                largest_pool_px=largest,
-                specular_px=spec_px,
-                scale_source=scale_source,
-            ),
-            mask,
-        )
+        return base, mask
+    return with_volume(
+        base, mm_per_px, mm_per_px_sigma,
+        depth_mm=depth_mm, depth_low_mm=depth_low_mm, depth_high_mm=depth_high_mm,
+    ), mask
 
+
+def with_volume(
+    m: BloodMeasurement,
+    mm_per_px: float,
+    mm_per_px_sigma: float,
+    *,
+    depth_mm: float = FILM_DEPTH_MM_NOMINAL,
+    depth_low_mm: float = FILM_DEPTH_MM_LOW,
+    depth_high_mm: float = FILM_DEPTH_MM_HIGH,
+    scale_source: str | None = None,
+) -> BloodMeasurement:
+    """The same measurement with an area and a volume interval at a given scale."""
+    area_px = m.area_px
     # Area interval: the scale enters squared, so its relative error doubles, and
     # the segmentation's own relative error adds in quadrature.
     rel_scale = (mm_per_px_sigma / mm_per_px) if mm_per_px else 0.0
@@ -573,29 +728,16 @@ def measure(
 
     # Volume interval: the worst case of the area interval against the depth range.
     # 1 ml = 1000 mm^3.
-    volume = area_mm2 * depth_mm / 1000.0
-    volume_low = area_low * depth_low_mm / 1000.0
-    volume_high = area_high * depth_high_mm / 1000.0
-
-    return (
-        BloodMeasurement(
-            area_px=area_px,
-            field_px=field_px,
-            area_fraction=fraction,
-            pools=pools,
-            largest_pool_px=largest,
-            specular_px=spec_px,
-            area_mm2=area_mm2,
-            area_mm2_low=max(0.0, area_low),
-            area_mm2_high=area_high,
-            volume_ml=volume,
-            volume_ml_low=max(0.0, volume_low),
-            volume_ml_high=volume_high,
-            mm_per_px=mm_per_px,
-            scale_source=scale_source,
-            reliable=area_px >= MIN_RELIABLE_POOL_PX,
-        ),
-        mask,
+    return replace(
+        m,
+        area_mm2=area_mm2,
+        area_mm2_low=max(0.0, area_low),
+        area_mm2_high=area_high,
+        volume_ml=area_mm2 * depth_mm / 1000.0,
+        volume_ml_low=max(0.0, area_low * depth_low_mm / 1000.0),
+        volume_ml_high=area_high * depth_high_mm / 1000.0,
+        mm_per_px=mm_per_px,
+        scale_source=scale_source or m.scale_source,
     )
 
 
@@ -606,6 +748,8 @@ def overlay(image: np.ndarray, mask: np.ndarray, colour: tuple[int, int, int]) -
     tint[:, :] = colour
     sel = mask.astype(bool)
     out[sel] = cv2.addWeighted(out, 0.55, tint, 0.45, 0.0)[sel]
-    contours, _ = cv2.findContours(mask.astype(np.uint8), cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+    contours, _ = cv2.findContours(
+        mask.astype(np.uint8), cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE
+    )
     cv2.drawContours(out, contours, -1, colour, 2)
     return out

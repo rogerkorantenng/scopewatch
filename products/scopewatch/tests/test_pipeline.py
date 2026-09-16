@@ -131,8 +131,24 @@ def test_the_fogged_window_asked_for_the_lens_to_be_cleaned(bleeding_case):
     assert 6.0 <= requests[0].at_ms / 1000.0 <= 10.5
 
 
-def test_the_checkpoint_is_held_and_names_the_frame(bleeding_case):
-    result, _ = bleeding_case
+@pytest.fixture(scope="module")
+def checkpoint_case(sample_video):
+    params = PipelineParams(stride=2, use_dnn=False, max_frames=400, auto_checkpoint=True)
+    record = RunRecord(product="scopewatch-test")
+    with recording(record):
+        result = analyse_case(sample_video, params=params)
+    return result, record
+
+
+def test_the_checkpoint_is_off_by_default(bleeding_case):
+    result, record = bleeding_case
+    assert not result.loop.checkpoints
+    to_record(result, record, PARAMS)
+    assert record.metrics["checkpoint"]["automatic"] is False
+
+
+def test_the_checkpoint_is_held_and_names_the_frame(checkpoint_case):
+    result, _ = checkpoint_case
     assert result.loop.checkpoints, "the wide device entered and no checkpoint was raised"
     cp = result.loop.checkpoints[0]
     assert cp.open
@@ -143,7 +159,7 @@ def test_the_checkpoint_is_held_and_names_the_frame(bleeding_case):
 
 def test_declaring_the_safety_view_suppresses_the_checkpoint(sample_video):
     params = PipelineParams(stride=3, use_dnn=False, max_frames=300,
-                            safety_view_established=True)
+                            safety_view_established=True, auto_checkpoint=True)
     record = RunRecord(product="scopewatch-test")
     with recording(record):
         result = analyse_case(sample_video, params=params)
@@ -155,8 +171,8 @@ def test_declaring_the_safety_view_suppresses_the_checkpoint(sample_video):
 # ---------------------------------------------------------------------------
 
 
-def test_the_phase_track_reaches_the_critical_approach(bleeding_case):
-    result, _ = bleeding_case
+def test_the_phase_track_reaches_the_critical_approach(checkpoint_case):
+    result, _ = checkpoint_case
     phases = [s.phase for s in result.phases.spans]
     assert "dissection" in phases
     assert "critical_approach" in phases
@@ -192,13 +208,18 @@ def test_every_number_on_the_headline_carries_its_uncertainty(bleeding_case):
     result, record = bleeding_case
     to_record(result, record, PARAMS)
     rows = {r["label"]: r for r in record.results}
-    peak = rows["Blood on the field, peak"]
-    assert peak["low"] is not None and peak["high"] is not None
+    assert rows["Blood-covered field, peak"]["measured"]
+    volume = rows["Blood on the field, volume"]
+    # The synthetic shafts hold a steady scale, so the gate passes and the volume
+    # carries its interval; on real footage this row is usually CANNOT_MEASURE.
+    assert volume["status"] == "MEASURED"
+    assert volume["low"] is not None and volume["high"] is not None
+    assert "Not validated on real footage" in volume["note"]
     onset_row = rows["Bleeding onset"]
     assert onset_row["plus_minus"] > 0
 
 
-def test_a_clip_with_no_scale_refuses_the_volume_and_says_what_would_fix_it(tmp_path):
+def test_a_clip_with_no_scale_withholds_the_volume_and_still_measures_the_field(tmp_path):
     from scopewatch.synth import CaseScript, write_case_video
 
     path = tmp_path / "no-instruments.mp4"
@@ -217,12 +238,34 @@ def test_a_clip_with_no_scale_refuses_the_volume_and_says_what_would_fix_it(tmp_
     with recording(record):
         result = analyse_case(path, params=PipelineParams(stride=2, use_dnn=False))
     to_record(result, record, PipelineParams())
-    assert record.refused
-    codes = [r.code for r in record.refusals]
-    assert "NO_SCALE_REFERENCE" in codes
-    refusal = next(r for r in record.refusals if r.code == "NO_SCALE_REFERENCE")
-    assert "instrument shaft" in refusal.details["hint"]
-    assert refusal.details["area_fraction_still_reported"] is True
+    assert not record.refused, "a missing scale refuses the volume, not the clip"
+    rows = {r["label"]: r for r in record.results}
+    assert rows["Blood-covered field, peak"]["measured"]
+    volume = rows["Blood on the field, volume"]
+    assert volume["status"] == "CANNOT_MEASURE"
+    assert volume["reason_code"] == "NO_SCALE_REFERENCE"
+    assert record.metrics["blood"]["volume"]["status"] == "CANNOT_MEASURE"
+    assert result.peak_volume_ml is None
+
+
+def test_an_inconsistent_scale_withholds_the_volume():
+    """Real footage: a shaft's apparent width moves with its distance from the lens."""
+    from scopewatch.pipeline import scale_gate
+
+    class _I:
+        def __init__(self, mm):
+            self.mm_per_px, self.mm_per_px_sigma, self.scale_source = mm, 0.01, "instrument_shaft"
+
+    class _F:
+        measurable = True
+
+        def __init__(self, mm):
+            self.instruments = _I(mm)
+
+    frames = [_F(0.1 if i % 2 else 0.2) for i in range(40)]
+    gate = scale_gate(frames)
+    assert gate["passed"] is False
+    assert gate["reason_code"] == "SCALE_INCONSISTENT"
 
 
 def test_an_entirely_unmeasurable_clip_refuses_the_whole_run(fogged_video):

@@ -43,6 +43,9 @@ class FrameQuality:
     usable: bool
     reasons: tuple[str, ...] = ()
     field_mask_fraction: float = 1.0
+    cool_share: float = 0.0
+    white_share: float = 0.0
+    rest_saturation: float = 0.0
 
     @property
     def reason(self) -> str | None:
@@ -65,6 +68,9 @@ class FrameQuality:
             "reasons": list(self.reasons),
             "message": self.message,
             "field_mask_fraction": round(self.field_mask_fraction, 4),
+            "cool_share": round(self.cool_share, 4),
+            "white_share": round(self.white_share, 4),
+            "rest_saturation": round(self.rest_saturation, 1),
         }
 
 
@@ -211,6 +217,28 @@ def clipped_fraction(grey: np.ndarray, mask: np.ndarray | None = None) -> float:
     return float(((sel <= 2) | (sel >= 253)).mean())
 
 
+def domain_cues(image: np.ndarray, mask: np.ndarray | None = None) -> tuple[float, float, float]:
+    """(cool-hue share, large near-white share, mean saturation of the rest).
+
+    The three numbers the out-of-domain gate reads; config.py says what each one
+    separated on real footage and what it did not.
+    """
+    lit = np.ones(image.shape[:2], bool) if mask is None else mask.astype(bool)
+    total = int(lit.sum())
+    if total == 0:
+        return 0.0, 0.0, 0.0
+    hsv = cv2.cvtColor(image, cv2.COLOR_BGR2HSV)
+    hue, sat, val = hsv[:, :, 0], hsv[:, :, 1], hsv[:, :, 2]
+    cool = (hue >= 35) & (hue <= 130) & (sat >= 40) & (val >= 40) & lit
+    white = ((sat < 40) & (val > 225) & lit).astype(np.uint8)
+    count, _labels, stats, _ = cv2.connectedComponentsWithStats(white, connectivity=8)
+    min_blob = max(20, int(0.002 * total))
+    big = sum(int(a) for a in stats[1:, cv2.CC_STAT_AREA] if a >= min_blob) if count > 1 else 0
+    rest = lit & ~white.astype(bool)
+    rest_sat = float(sat[rest].mean()) if rest.any() else 0.0
+    return float(cool.sum()) / total, big / total, rest_sat
+
+
 # ---------------------------------------------------------------------------
 # The verdict
 # ---------------------------------------------------------------------------
@@ -247,7 +275,15 @@ def assess(
         occ = occlusion_fraction(image, lit)
         clip = clipped_fraction(grey, lit)
 
+        cool, white, rest_sat = domain_cues(image, lit)
+
         reasons: list[str] = []
+        # Domain first: a frame of drapes or gloved hands is not a laparoscopic frame
+        # that happens to be hard to measure, and no other refusal describes it.
+        if cool >= t.domain_cool_max or (
+            white >= t.domain_white_min and rest_sat >= t.domain_rest_saturation_min
+        ):
+            reasons.append("OUT_OF_DOMAIN")
         # Fog is checked before focus: a fogged frame is also out of focus, and the
         # useful thing to tell a scrub nurse is "wipe the lens", not "it is blurry".
         if dc > t.fog_dark_channel_max and contrast < t.fog_contrast_min:
@@ -268,4 +304,7 @@ def assess(
             usable=not reasons,
             reasons=tuple(reasons),
             field_mask_fraction=float(lit.mean()),
+            cool_share=cool,
+            white_share=white,
+            rest_saturation=rest_sat,
         )

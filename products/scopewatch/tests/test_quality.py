@@ -13,7 +13,6 @@ from scopewatch import quality
 from scopewatch.config import Thresholds
 from scopewatch.synth import SceneSpec, render
 
-
 # ---------------------------------------------------------------------------
 # The lit field
 # ---------------------------------------------------------------------------

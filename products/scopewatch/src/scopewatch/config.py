@@ -40,7 +40,10 @@ FILM_DEPTH_MM_HIGH = 3.0
 # Chosen by experiment. `experiments.run_colour_space_trial()` scores five candidate
 # spaces on synthetic scenes with masks known by construction; the winner and its
 # Dice score are written into docs/evaluation.md. Change this only by re-running it.
-BLOOD_COLOUR_SPACE = "ratio_dark"  # normalised redness AND flattened darkness
+# The choice moved from synthetic scenes to real ones. `ratio_dark` won the synthetic
+# trial and scored precision 0 and recall 0 on the held-out real clips; the decision
+# in use is chosen on the dev split of hand-labelled real frames (realdata.py).
+BLOOD_COLOUR_SPACE = "chroma_scene"  # chroma per lightness, red hue, above the scene
 
 # a* is stored 0..255 with 128 as neutral. Pooled blood sits well above neutral.
 LAB_A_MIN = 148
@@ -103,6 +106,29 @@ OCCLUSION_MAX_FRACTION = 0.55
 # Clipping. An over- or under-exposed frame cannot be colour-segmented at all.
 EXPOSURE_CLIP_MAX_FRACTION = 0.34
 
+# Out of domain: this is not the inside of an abdomen seen through a laparoscope.
+# Added after real footage, where an open cholecystectomy (gloved fingers, open
+# abdomen) was measured as if it were laparoscopic and the last seconds of a
+# laparoscopic clip, filmed from outside under green drapes, were measured too.
+#
+# Two cues, both colour, both checked on all sixteen real clips (docs/evaluation.md):
+# * Drapes and gowns are green or blue. Inside the abdomen almost nothing is, except
+#   mesh and some sutures. Share of the field with a cool hue (OpenCV H 35 to 130,
+#   S and V at least 40): at most 0.15 on laparoscopic frames other than one TEP
+#   clip whose blue mesh reached 0.42 on a few frames; 0.41 to 0.55 on the draped
+#   tail of Kaplan S6.
+DOMAIN_COOL_HUE_MAX = 0.45
+# * Gloved hands and gauze are large near-white objects (S < 40, V > 225, blobs of
+#   at least 0.2% of the field, so speculars do not count) in a field that is
+#   otherwise strongly saturated. On the one open-surgery clip this held on 48% of
+#   frames; on the fifteen laparoscopic clips on at most 2%. Pale laparoscopic scenes
+#   (TEP) have large white regions too, but the rest of their field is not saturated.
+DOMAIN_WHITE_MIN = 0.08
+DOMAIN_REST_SATURATION_MIN = 120.0
+# A clip where this share of frames is out of domain is refused as a whole. Gloves
+# are not in every frame of an open operation, so this is well below a majority.
+DOMAIN_CLIP_SHARE = 0.25
+
 # ---------------------------------------------------------------------------
 # Temporal
 # ---------------------------------------------------------------------------
@@ -122,6 +148,21 @@ MEDIAN_WINDOW = 5  # frames; rejects a single mis-segmented frame
 ONSET_WINDOW_S = 4.0
 ONSET_RATE_ML_PER_MIN = 0.35
 
+# What onset is now measured on. The millilitre series needs a scale on every frame,
+# and on real footage the scale is missing or inconsistent on most frames (see
+# SCALE_* below), so a millilitre onset detector mostly watched zeros. The field
+# fraction needs no scale: it is the share of the visible field segmented as blood,
+# in percentage points, and its rate is percentage points per minute. The threshold
+# is a sustained rise of three points a minute over the four-second window; see
+# docs/evaluation.md for the synthetic and real cases it was checked against.
+ONSET_RATE_PCT_PER_MIN = 3.0
+ONSET_CUSUM_MIN_SIGMA_PCT = 0.02
+
+# A blood area below this share of the visible field is too small for its rate of
+# change to mean anything: at that size the segmentation's own frame-to-frame jitter
+# is the same order as a bleed. Replaces a pixel count that was set on 960 px frames.
+MIN_RELIABLE_FIELD_FRACTION = 0.005
+
 # The CUSUM's slack and decision interval are set from the series' own noise rather
 # than in absolute millilitres, because "how much does this estimate jitter" depends
 # on the scope, the distance and the field size, and a fixed millilitre figure is
@@ -134,6 +175,22 @@ ONSET_CUSUM_MIN_SIGMA_ML = 0.002  # a floor, so a perfectly flat series still wo
 # Global camera motion. Estimated by phase correlation on a downscaled grey frame.
 # Above this the field moved and a rate-of-change estimate is not about bleeding.
 MOTION_SUSPECT_PX = 14.0
+
+# ---------------------------------------------------------------------------
+# Scale, and when a millilitre figure may be shown at all
+# ---------------------------------------------------------------------------
+
+# Millilitres need a scale, and the scale comes from instrument shafts. On real
+# footage that scale moves with every instrument's distance from the lens, so a
+# volume is shown only when the case's scale passes both of these. Otherwise the
+# volume row says CANNOT_MEASURE with the reason, and the field fraction stands.
+#
+# The share of measurable frames that must carry a shaft scale.
+SCALE_MIN_FRAME_SHARE = 0.25
+# The robust coefficient of variation (1.4826 x MAD / median) of the per-frame
+# scale across the case. Above this the "scale" is a number that wanders by more
+# than a quarter between frames, and a volume built on it would wander by half.
+SCALE_MAX_CV = 0.25
 
 # ---------------------------------------------------------------------------
 # Instruments
@@ -212,9 +269,14 @@ class PipelineParams:
     film_depth_low_mm: float = FILM_DEPTH_MM_LOW
     film_depth_high_mm: float = FILM_DEPTH_MM_HIGH
     onset_rate_ml_per_min: float = ONSET_RATE_ML_PER_MIN
+    onset_rate_pct_per_min: float = ONSET_RATE_PCT_PER_MIN
     use_dnn: bool = True
     rescan: bool = True  # the agent's second look around a detected onset
     safety_view_established: bool = False
+    # The automatic, phase-driven checkpoint. Off by default: on real footage its
+    # image cue (instrument width) cannot tell a clip applier from a grasper nearer
+    # the lens. See phase.py and docs/report.md.
+    auto_checkpoint: bool = False
 
     def to_dict(self) -> dict[str, float | int | bool | None]:
         return {
@@ -227,9 +289,11 @@ class PipelineParams:
             "film_depth_low_mm": self.film_depth_low_mm,
             "film_depth_high_mm": self.film_depth_high_mm,
             "onset_rate_ml_per_min": self.onset_rate_ml_per_min,
+            "onset_rate_pct_per_min": self.onset_rate_pct_per_min,
             "use_dnn": self.use_dnn,
             "rescan": self.rescan,
             "safety_view_established": self.safety_view_established,
+            "auto_checkpoint": self.auto_checkpoint,
         }
 
 
@@ -258,7 +322,9 @@ REFUSAL_CODES: dict[str, str] = {
     "LENS_FOGGED": "Haze or smoke across the lens; the field is not visible.",
     "OCCLUDED": "Too much of the field is covered to measure what is on it.",
     "EXPOSURE_CLIPPED": "The frame is clipped; colour cannot be separated.",
+    "OUT_OF_DOMAIN": "This does not look like the inside of an abdomen through a laparoscope.",
     "NO_SCALE_REFERENCE": "No instrument shaft in view, so there is no scale.",
+    "SCALE_INCONSISTENT": "The shaft scale wanders too much across the case to build a volume on.",
     "NO_USABLE_FRAMES": "No frame in this clip was good enough to measure.",
     "DECODE_FAILED": "The file could not be decoded as video or an image.",
 }
@@ -273,4 +339,7 @@ class Thresholds:
     fog_contrast_min: float = FOG_CONTRAST_MIN
     occlusion_max: float = OCCLUSION_MAX_FRACTION
     exposure_clip_max: float = EXPOSURE_CLIP_MAX_FRACTION
+    domain_cool_max: float = DOMAIN_COOL_HUE_MAX
+    domain_white_min: float = DOMAIN_WHITE_MIN
+    domain_rest_saturation_min: float = DOMAIN_REST_SATURATION_MIN
     extras: dict[str, float] = field(default_factory=dict)

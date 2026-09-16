@@ -162,7 +162,9 @@ def area_and_scale_trial(seeds: tuple[int, ...] = SEEDS) -> dict[str, Any]:
             spec = SceneSpec(pool_area_px=area, blush_area_px=DISTRACTOR_PX, seed=seed + area)
             scene = render(spec)
             lit = quality_mod.field_mask(scene.image)
-            reading, _ = instruments_mod.read_frame(scene.image, lit, assumed_shaft_mm=spec.shaft_mm)
+            reading, _ = instruments_mod.read_frame(
+                scene.image, lit, assumed_shaft_mm=spec.shaft_mm
+            )
             measurement, mask = blood_mod.measure(
                 scene.image,
                 lit,
@@ -261,7 +263,8 @@ def refusal_sweep(seeds: tuple[int, ...] = SEEDS[:4]) -> dict[str, Any]:
             for seed in seeds:
                 kwargs: dict[str, Any] = {"pool_area_px": 12_000, "blush_area_px": DISTRACTOR_PX,
                                           "seed": seed}
-                kwargs[{"blur": "blur_sigma", "fog": "fog", "occlusion": "occlusion"}[kind]] = float(level)
+                field_name = {"blur": "blur_sigma", "fog": "fog", "occlusion": "occlusion"}[kind]
+                kwargs[field_name] = float(level)
                 scene = render(SceneSpec(**kwargs))
                 lit = quality_mod.field_mask(scene.image)
                 q = quality_mod.assess(scene.image, mask=lit)
@@ -464,7 +467,9 @@ def timing_trial(repeats: int = 12) -> dict[str, Any]:
         "motion.phaseCorrelate",
         lambda: cv2.phaseCorrelate(
             cv2.resize(cv2.cvtColor(image, cv2.COLOR_BGR2GRAY), (256, 256)).astype(np.float32),
-            cv2.resize(cv2.cvtColor(estimator_image, cv2.COLOR_BGR2GRAY), (256, 256)).astype(np.float32),
+            cv2.resize(
+                cv2.cvtColor(estimator_image, cv2.COLOR_BGR2GRAY), (256, 256)
+            ).astype(np.float32),
         ),
     )
     return {
@@ -527,7 +532,7 @@ def write_plots(results: dict[str, Any], out_dir: Path) -> list[str]:
     # flattens the refusal curve - the thing the plot is about - onto the baseline.
     # The error gets its own log axis on the right.
     fig, axes = plt.subplots(1, 3, figsize=(12, 3.8), facecolor=ground)
-    for ax, (kind, rows) in zip(axes, results["refusal"]["sweeps"].items()):
+    for ax, (kind, rows) in zip(axes, results["refusal"]["sweeps"].items(), strict=False):
         levels = [r["level"] for r in rows]
         refused = [100.0 * r["refused_fraction"] for r in rows]
         errs = [max(0.05, abs(r["area_error_pct_if_forced"].get("median", 0.0)))
@@ -660,7 +665,8 @@ def main() -> None:
         json.dumps(published, indent=2, default=str), encoding="utf-8"
     )
     print(json.dumps({k: v for k, v in published.items()
-                      if k in ("colour_space", "cases", "elapsed_s")}, indent=2, default=str)[:4000])
+                      if k in ("colour_space", "cases", "elapsed_s")},
+                     indent=2, default=str)[:4000])
     print(f"\nwrote {out_dir / 'evaluation.json'} and {len(results['plots'])} plots")
 
 

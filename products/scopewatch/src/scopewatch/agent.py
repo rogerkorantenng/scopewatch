@@ -71,6 +71,10 @@ class Observation:
     onset: bool = False
     safety_view_established: bool = False
     evidence_uri: str | None = None
+    field_fraction: float | None = None
+    # The automatic checkpoint is off by default; see phase.py for why. When it is
+    # off, the loop never moves toward a hold, whatever the phase says.
+    checkpoint_enabled: bool = True
 
 
 @dataclass
@@ -239,7 +243,12 @@ class AgentLoop:
         # 1. An onset on the coarse pass buys a dense re-read of that window.
         if obs.onset and not self._onset_recorded:
             self._onset_recorded = True
-            emitted.append(self._act(ACTION_RECORD_ONSET, obs, volume_ml=obs.volume_ml))
+            emitted.append(
+                self._act(
+                    ACTION_RECORD_ONSET, obs,
+                    volume_ml=obs.volume_ml, field_fraction=obs.field_fraction,
+                )
+            )
             emitted.append(
                 self._act(
                     ACTION_RESCAN,
@@ -255,7 +264,11 @@ class AgentLoop:
         if self.state in (CONFIRMED, DISMISSED):
             return emitted  # this case's checkpoint has been answered already
 
-        approaching = obs.phase == "critical_approach" and not obs.safety_view_established
+        approaching = (
+            obs.checkpoint_enabled
+            and obs.phase == "critical_approach"
+            and not obs.safety_view_established
+        )
         if approaching and self.state == OBSERVING:
             self._candidate_since = obs.timestamp_ms
             self._transition(CANDIDATE, obs, trigger="phase entered critical_approach")

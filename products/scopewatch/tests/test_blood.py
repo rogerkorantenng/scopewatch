@@ -181,7 +181,9 @@ def test_a_large_pool_is_measured_to_within_ten_percent(big_scene):
 
 
 def test_a_small_pool_is_flagged_as_unreliable_rather_than_reported_confidently():
-    scene = render(SceneSpec(pool_area_px=1_200, blush_area_px=20_000, seed=7))
+    # Reliability is now a share of the visible field (0.5%), not a pixel count set on
+    # 960 px frames. This aperture is about 213,000 px, so a 600 px pool is 0.3% of it.
+    scene = render(SceneSpec(pool_area_px=600, blush_area_px=20_000, seed=7))
     lit = field_mask(scene.image)
     m, _ = blood.measure(scene.image, lit, method="ratio_dark", mm_per_px=0.09)
     assert m.reliable is False

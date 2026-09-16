@@ -46,6 +46,39 @@ from .config import (
 # rather than as evidence that the component is not a single shaft.
 MAX_WIDTH_SPREAD = 0.15
 
+# Every pixel constant in this module was set on 960-pixel frames. Real clips arrive
+# at 320 x 240 as often as not, and an area floor of 900 pixels there is a shaft
+# that fills a sixth of the frame: on four 320 x 240 TEP clips and the WSES ulcer
+# clip, visible shafts were thrown away as speckle and the whole clip was refused
+# for want of a scale. Lengths scale with the frame's long side, areas with its
+# square.
+REFERENCE_SIDE_PX = 960.0
+
+
+def resolution_factor(shape: tuple[int, ...]) -> float:
+    return max(shape[:2]) / REFERENCE_SIDE_PX
+
+
+# The edge-profile width. Profiles perpendicular to the shaft axis, across its middle
+# third; the shaft is the run of low saturation between two tissue shoulders.
+EDGE_PROFILES = 9
+EDGE_MIN_PROFILES = 5
+EDGE_MAX_SPREAD = 0.2  # interquartile range over median, across the profiles
+EDGE_MIN_CONTRAST = 25.0  # saturation levels between shaft core and tissue
+
+# The span of the frame a laparoscope can plausibly see at working distance, used
+# only to reject shaft widths that cannot be a shaft. A wide-angle laparoscope
+# (roughly 70 to 85 degrees across) held 2 to 12 cm from tissue sees on the order of
+# 3 to 18 cm; the bounds are set wider than that on purpose, because this is a
+# sanity check, not a measurement.
+FIELD_MM_MIN = 20.0
+
+# How far inside the rim an entry is measured, as a share of the frame's long side,
+# and how elongated that piece must be to be read as a shaft rather than a blob.
+ENTRY_BAND_FRACTION = 0.22
+ENTRY_MIN_ELONGATION = 2.0
+FIELD_MM_MAX = 220.0
+
 
 @dataclass(frozen=True)
 class Shaft:
@@ -62,6 +95,21 @@ class Shaft:
     touches_border: bool
     tip: tuple[int, int]
     angle_deg: float
+    # Edge-to-edge widths measured near where the steel enters the field, one per
+    # entry: (width px, profiles that found both edges, IQR over median).
+    entry_widths: tuple[tuple[float, int, float], ...] = ()
+
+    @property
+    def scale_widths_px(self) -> list[float]:
+        """The widths a scale may be taken from. Empty when there are none.
+
+        Only edge-to-edge widths qualify, measured on enough profiles with a small
+        enough spread. See `edge_width` for why the mask's medial-axis width does not.
+        """
+        return [
+            w for (w, n, spread) in self.entry_widths
+            if n >= EDGE_MIN_PROFILES and spread <= EDGE_MAX_SPREAD and w > 2.0
+        ]
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -75,6 +123,10 @@ class Shaft:
             "touches_border": self.touches_border,
             "tip": list(self.tip),
             "angle_deg": round(self.angle_deg, 1),
+            "entry_widths_px": [
+                {"width_px": round(w, 2), "profiles": n, "spread": round(sp, 3)}
+                for (w, n, sp) in self.entry_widths
+            ],
         }
 
 
@@ -128,7 +180,8 @@ def metallic_mask(image: np.ndarray, field_mask: np.ndarray | None = None) -> np
     mask = ((sat <= INSTRUMENT_S_MAX) & (val >= INSTRUMENT_V_MIN)).astype(np.uint8)
     if field_mask is not None:
         mask = cv2.bitwise_and(mask, field_mask.astype(np.uint8))
-    kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (7, 7))
+    k = max(3, round(7 * resolution_factor(image.shape)) | 1)
+    kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (k, k))
     mask = cv2.morphologyEx(mask, cv2.MORPH_OPEN, kernel)
     return cv2.morphologyEx(mask, cv2.MORPH_CLOSE, kernel)
 
@@ -152,9 +205,8 @@ def field_boundary(field_mask: np.ndarray | None, shape: tuple[int, int]) -> np.
         ring[:, -m:] = 1
         return ring
     mask = field_mask.astype(np.uint8)
-    kernel = cv2.getStructuringElement(
-        cv2.MORPH_ELLIPSE, (2 * INSTRUMENT_BORDER_MARGIN_PX + 1,) * 2
-    )
+    margin = max(2, round(INSTRUMENT_BORDER_MARGIN_PX * resolution_factor(shape)))
+    kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (2 * margin + 1,) * 2)
     return cv2.subtract(mask, cv2.erode(mask, kernel))
 
 
@@ -203,14 +255,125 @@ def _tip_and_angle(
     height, width = component.shape
 
     def inwardness(p: np.ndarray) -> float:
-        col, row = int(round(p[0])), int(round(p[1]))
+        col, row = round(p[0]), round(p[1])
         if field_dist is not None:
             return float(field_dist[min(max(row, 0), height - 1), min(max(col, 0), width - 1)])
         return float(min(col, row, width - 1 - col, height - 1 - row))
 
     tip = max(candidates, key=inwardness)
     angle = float(np.degrees(np.arctan2(axis[1], axis[0])))
-    return (int(round(tip[0])), int(round(tip[1]))), angle
+    return (round(tip[0]), round(tip[1])), angle
+
+
+def edge_width(
+    saturation: np.ndarray, component: np.ndarray, *, profiles: int = EDGE_PROFILES
+) -> tuple[float | None, int, float | None]:
+    """Edge-to-edge shaft width from saturation profiles across the shaft axis.
+
+    Returns (median width px, profiles that found both edges, IQR over median).
+
+    This replaced the medial-axis width of the steel mask as the scale reference,
+    and real footage is why. The mask is "low saturation and bright", and a wet steel
+    cylinder under a scope's light is bright only along the stripe facing the light;
+    the shaded half is grey or dark and fails the brightness test. So the mask covers
+    about half the shaft and its medial axis is half the width. Measured on nine
+    shafts in seven real frames the edge-to-edge width was a median 2.2 times the
+    mask width (1.1 to 2.4), which is exactly the factor by which the implied field
+    of view came out too wide. Saturation does not have that problem: the whole
+    cylinder is achromatic, lit side and shaded side, and the tissue on either side
+    of it is not.
+    """
+    ys, xs = np.nonzero(component)
+    if xs.size < 32:
+        return None, 0, None
+    pts = np.stack([xs, ys], axis=1).astype(np.float32)
+    centre = pts.mean(axis=0)
+    _, _, vt = np.linalg.svd(pts - centre, full_matrices=False)
+    axis = vt[0]
+    normal = np.array([-axis[1], axis[0]], np.float32)
+    along = (pts - centre) @ axis
+    lo, hi = np.percentile(along, [33.0, 67.0])
+    h, w = saturation.shape[:2]
+    reach = max(40.0, float(max(h, w)) * 0.12)
+    steps = np.arange(-reach, reach + 0.5, 0.5, dtype=np.float32)
+    mid = steps.size // 2
+    core_half = max(2, round(3 * resolution_factor(saturation.shape) * 2))
+    widths: list[float] = []
+    for u in np.linspace(lo, hi, profiles):
+        origin = centre + float(u) * axis
+        coords = origin[None, :] + steps[:, None] * normal[None, :]
+        inside = (
+            (coords[:, 0] >= 0) & (coords[:, 0] <= w - 1)
+            & (coords[:, 1] >= 0) & (coords[:, 1] <= h - 1)
+        )
+        if inside.sum() < 0.6 * steps.size:
+            continue
+        prof = cv2.remap(
+            saturation, coords[:, 0].reshape(-1, 1), coords[:, 1].reshape(-1, 1),
+            cv2.INTER_LINEAR,
+        ).ravel()
+        prof = np.where(inside, prof, np.nan)
+        core = np.nanmin(prof[mid - core_half: mid + core_half + 1])
+        tissue = np.nanpercentile(prof, 85.0)
+        if not np.isfinite(core) or tissue - core < EDGE_MIN_CONTRAST:
+            continue
+        threshold = (core + tissue) / 2.0
+        filled = np.nan_to_num(prof, nan=255.0)
+        below = filled < threshold
+        if not below[mid]:
+            continue
+        a = mid
+        while a > 0 and below[a - 1]:
+            a -= 1
+        b = mid
+        while b < below.size - 1 and below[b + 1]:
+            b += 1
+        if a == 0 or b == below.size - 1 or not inside[a - 1] or not inside[b + 1]:
+            continue  # an edge ran off the frame; this profile cannot see both sides
+        # Sub-sample edges: where the profile crosses the threshold, by linear
+        # interpolation. Counting whole samples adds half a sample to every width.
+        left = (a - 1) + (filled[a - 1] - threshold) / max(1e-6, filled[a - 1] - filled[a])
+        right = b + (threshold - filled[b]) / max(1e-6, filled[b + 1] - filled[b])
+        widths.append(float(right - left) * 0.5)
+    if not widths:
+        return None, 0, None
+    arr = np.asarray(widths)
+    median = float(np.median(arr))
+    q1, q3 = np.percentile(arr, [25.0, 75.0])
+    return median, int(arr.size), float((q3 - q1) / median) if median > 0 else None
+
+
+def _entry_widths(
+    saturation: np.ndarray,
+    component: np.ndarray,
+    ring: np.ndarray,
+    field_dist: np.ndarray,
+    min_area_px: int,
+) -> tuple[tuple[float, int, float], ...]:
+    """Edge widths of each place this steel component enters the field.
+
+    Measured on the part of the component within a band inside the rim, not on the
+    whole component. Two instruments working on one structure merge near their
+    tips, and a merged blob has no single axis to measure across; near the rim, where
+    each comes through its own port, they are still apart.
+    """
+    band_px = ENTRY_BAND_FRACTION * float(max(component.shape[:2]))
+    near = (component.astype(bool) & (field_dist < band_px)).astype(np.uint8)
+    count, labels, stats, _ = cv2.connectedComponentsWithStats(near, 8)
+    out: list[tuple[float, int, float]] = []
+    for i in range(1, count):
+        if stats[i, cv2.CC_STAT_AREA] < max(24, min_area_px // 4):
+            continue
+        piece = (labels == i).astype(np.uint8)
+        if not cv2.bitwise_and(piece, ring).any():
+            continue
+        elongation, _minor = _rect_elongation(piece)
+        if elongation < ENTRY_MIN_ELONGATION:
+            continue
+        width, n, spread = edge_width(saturation, piece)
+        if width is not None and spread is not None:
+            out.append((width, n, spread))
+    return tuple(out)
 
 
 def find_shafts(
@@ -224,6 +387,11 @@ def find_shafts(
     with stage("instruments:shafts"):
         mask = metallic_mask(image, field_mask)
         ring = field_boundary(field_mask, mask.shape)
+        factor = resolution_factor(image.shape)
+        min_area_px = max(60, round(min_area_px * factor * factor))
+        saturation = cv2.GaussianBlur(
+            cv2.cvtColor(image, cv2.COLOR_BGR2HSV)[:, :, 1].astype(np.float32), (3, 3), 0
+        )
         lit = (field_mask.astype(np.uint8) if field_mask is not None
                else np.ones(mask.shape, np.uint8))
         field_dist = cv2.distanceTransform(lit, cv2.DIST_L2, 5)
@@ -253,6 +421,10 @@ def find_shafts(
                 continue
             spread = float((profile.p90_px or profile.p50_px) - profile.p50_px)
             tip, angle = _tip_and_angle(component, (x, y, w, h), field_dist)
+            entry_widths = (
+                _entry_widths(saturation, component, ring, field_dist, min_area_px)
+                if on_border else ()
+            )
             shafts.append(
                 Shaft(
                     label=label,
@@ -266,6 +438,7 @@ def find_shafts(
                     touches_border=on_border,
                     tip=tip,
                     angle_deg=angle,
+                    entry_widths=entry_widths,
                 )
             )
             kept[labels == label] = 255
@@ -287,6 +460,9 @@ def count_entries(
     steel, and counting it puts a phantom instrument in an empty field - which then
     puts the phase machine into `exposure` for a case that has not started.
     """
+    factor = resolution_factor(mask.shape)
+    min_component_px = max(60, round(min_component_px * factor * factor))
+    min_px = max(6, round(min_px * factor))
     count, labels, stats, _ = cv2.connectedComponentsWithStats(mask, 8)
     substantial = np.zeros(mask.shape, np.uint8)
     for i in range(1, count):
@@ -307,51 +483,61 @@ def scale_from_shafts(
     *,
     assumed_mm: float = 5.0,
     match_catalogue: bool = True,
+    frame_long_side_px: int | None = None,
 ) -> tuple[float | None, float, float | None]:
-    """Millimetres per pixel from the widest border-touching shaft.
+    """Millimetres per pixel from a border-touching shaft's edge-to-edge width.
 
     Returns (mm_per_px, sigma, assumed_shaft_mm). `None` when nothing in the frame
     can carry a scale, which is a refusal the caller must surface, not a zero.
 
-    Only shafts that touch the border are used: a bright elongated blob that does
-    not reach the edge of the projected circle is more likely a highlight on a clip
-    or a piece of gauze than an instrument entering through a port.
+    Only single (not merged) shafts that touch the edge of the field and whose edge
+    profile found both edges consistently are used. A shaft that does not reach the
+    edge of the projected circle is more likely a highlight on a clip or tissue.
 
-    The sigma combines the manufacturing tolerance of the reference (a real 5 mm
-    shaft is 5 mm to about a tenth) with the spread of the medial-axis width
-    samples, which is what perspective foreshortening and a wet shaft do to the
-    measurement.
+    What this scale is, and is not: the millimetres a pixel spans *at the depth of
+    that shaft*. The blood is on tissue at some other depth, and on real footage two
+    instruments in the same frame differ in apparent width by more than the
+    manufacturing tolerance ever could. So the per-frame sigma here is only the
+    measurement's own spread; whether the scale can be used at all is decided over
+    the whole case by `pipeline.scale_gate`, which looks at how much it wanders.
     """
-    usable = [s for s in shafts if s.touches_border and s.width_px > 2.0]
-    if not usable:
+    widths = sorted(
+        w for s in shafts if s.touches_border for w in s.scale_widths_px
+    )
+    if frame_long_side_px:
+        # A shaft of the assumed diameter this narrow would put more than
+        # FIELD_MM_MAX across the frame, and one this wide less than FIELD_MM_MIN.
+        # Neither is a laparoscope at working distance; both are something else
+        # (a specular streak on tissue, a smear on the lens) measured as a shaft.
+        lo = assumed_mm * frame_long_side_px / FIELD_MM_MAX
+        hi = assumed_mm * frame_long_side_px / FIELD_MM_MIN
+        widths = [w for w in widths if lo <= w <= hi]
+    if not widths:
         return None, 0.0, None
-    # Prefer a shaft that is on its own. A merged component is two instruments, and
-    # its width distribution is bimodal: the spread between its median and its 90th
-    # percentile is the difference between two different instruments, not the
-    # uncertainty in measuring one. Taken as an uncertainty it reached 97% on a
-    # sample case, which widened the reported volume interval to nearly six times
-    # the estimate and made the number useless.
-    singles = [s for s in usable if not s.merged]
-    pool = singles or usable
-    shaft = max(pool, key=lambda s: s.area_px)
     diameter_mm = assumed_mm
-    if match_catalogue and len(pool) >= 2:
+    width = float(np.median(widths))
+    if match_catalogue and len(widths) >= 2 and widths[-1] > 1.7 * widths[0]:
         # Two instruments of the same catalogue size should measure the same width.
-        # If the widest is close to double the narrowest, it is a 10 mm device and
-        # the narrow one is the better reference.
-        widths = sorted(s.width_px for s in pool)
-        if widths[-1] > 1.7 * widths[0]:
-            shaft = min(pool, key=lambda s: s.width_px)
-            diameter_mm = min(SHAFT_DIAMETERS_MM, key=lambda d: abs(d - assumed_mm))
-    mm_per_px = diameter_mm / shaft.width_px
+        # If the widest is close to double the narrowest it may be a 10 mm device,
+        # and the narrow one is the better reference for the assumed size.
+        width = widths[0]
+        diameter_mm = min(SHAFT_DIAMETERS_MM, key=lambda d: abs(d - assumed_mm))
+    mm_per_px = diameter_mm / width
     rel_tolerance = SHAFT_TOLERANCE_MM / diameter_mm
-    rel_measurement = shaft.width_iqr_px / shaft.width_px if shaft.width_px else 0.0
-    # Capped, for the reason above. Past this the spread is telling us the component
-    # is not one shaft, which is a segmentation fact rather than a measurement
-    # uncertainty, and the frame is better handled by the case-level median.
-    rel_measurement = min(rel_measurement, MAX_WIDTH_SPREAD)
+    spreads = [
+        sp for s in shafts if s.touches_border for (w, n, sp) in s.entry_widths
+        if w in widths
+    ]
+    rel_measurement = min(float(np.median(spreads)) if spreads else 0.0, MAX_WIDTH_SPREAD)
+    # Never tighter than a sample-and-a-half at the edges.
+    rel_measurement = max(rel_measurement, 0.75 / width)
     sigma = mm_per_px * float(np.hypot(rel_tolerance, rel_measurement))
     return mm_per_px, sigma, diameter_mm
+
+
+def frame_widths(shafts: list[Shaft]) -> list[float]:
+    """Every qualified edge width in the frame, for the wide-device comparison."""
+    return sorted(w for s in shafts if s.touches_border for w in s.scale_widths_px)
 
 
 # ---------------------------------------------------------------------------
@@ -398,7 +584,9 @@ def read_frame(
         mm_per_px, sigma, assumed = mm_per_px_override, 0.0, None
         source = "operator"
     else:
-        mm_per_px, sigma, assumed = scale_from_shafts(shafts, assumed_mm=assumed_shaft_mm)
+        mm_per_px, sigma, assumed = scale_from_shafts(
+            shafts, assumed_mm=assumed_shaft_mm, frame_long_side_px=max(image.shape[:2])
+        )
         source = "instrument_shaft" if mm_per_px else "none"
 
     reading = InstrumentReading(

@@ -39,7 +39,6 @@ from .config import (
     SMOOTHING_ALPHA,
 )
 
-
 # ---------------------------------------------------------------------------
 # Camera motion
 # ---------------------------------------------------------------------------
@@ -105,7 +104,9 @@ def ema(values: list[float], alpha: float = SMOOTHING_ALPHA) -> list[float]:
     return out
 
 
-def smooth(values: list[float], *, window: int = MEDIAN_WINDOW, alpha: float = SMOOTHING_ALPHA) -> list[float]:
+def smooth(
+    values: list[float], *, window: int = MEDIAN_WINDOW, alpha: float = SMOOTHING_ALPHA
+) -> list[float]:
     return ema(median_filter(values, window), alpha)
 
 
@@ -163,6 +164,7 @@ def cusum(
     *,
     k: float | None = None,
     h: float | None = None,
+    min_sigma: float = ONSET_CUSUM_MIN_SIGMA_ML,
 ) -> tuple[list[float], int | None]:
     """One-sided upward CUSUM on the first differences. Returns (statistic, first alarm).
 
@@ -172,7 +174,7 @@ def cusum(
     noise, because a millilitre figure that is right for one scope at one working
     distance is wrong for the next.
     """
-    sigma = difference_sigma(values)
+    sigma = difference_sigma(values, floor=min_sigma)
     k = ONSET_CUSUM_K_SIGMA * sigma if k is None else k
     h = ONSET_CUSUM_H_SIGMA * sigma if h is None else h
     s = 0.0
@@ -194,6 +196,30 @@ def cusum(
 # ---------------------------------------------------------------------------
 
 
+# The gates, in the order they are checked. A candidate frame is one whose fitted
+# rate reached the threshold; each gate below can still stop it, and the reason
+# string counts how many candidates each one stopped. The first version of this
+# module reported "peak slope X never reached the threshold" whenever no onset was
+# declared, computed over frames that had passed only some of the gates. On three
+# real clips the rate had reached the threshold and a different gate had stopped the
+# alarm, so the message said the opposite of what had happened.
+GATE_UNMEASURABLE = "unmeasurable"
+GATE_MOTION = "camera_motion"
+GATE_UNRELIABLE = "unreliable_measurement"
+GATE_INSTRUMENTS = "instrument_count_changed"
+GATE_CUSUM = "cusum_not_confirmed"
+GATES: tuple[str, ...] = (
+    GATE_UNMEASURABLE, GATE_MOTION, GATE_UNRELIABLE, GATE_INSTRUMENTS, GATE_CUSUM,
+)
+GATE_WORDS = {
+    GATE_UNMEASURABLE: "the frame was refused by a quality or domain gate",
+    GATE_MOTION: "the camera was moving",
+    GATE_UNRELIABLE: "the blood area was below the reliable size",
+    GATE_INSTRUMENTS: "an instrument entered or left inside the fit window",
+    GATE_CUSUM: "the CUSUM had not confirmed a sustained step",
+}
+
+
 @dataclass
 class Onset:
     """When the rate of change crossed the threshold, and how sure we are of when."""
@@ -202,21 +228,32 @@ class Onset:
     index: int | None = None
     timestamp_ms: float | None = None
     uncertainty_ms: float = 0.0
-    rate_ml_per_min: float | None = None
-    threshold_ml_per_min: float = ONSET_RATE_ML_PER_MIN
+    rate_per_min: float | None = None
+    threshold_per_min: float = ONSET_RATE_ML_PER_MIN
+    unit: str = "ml/min"
     cusum_index: int | None = None
     reason: str = ""
+    peak_rate_any_per_min: float | None = None
+    candidates: int = 0
+    blocked_by: dict[str, int] = field(default_factory=dict)
 
     def to_dict(self) -> dict[str, Any]:
+        def r(v: float | None, n: int = 3) -> float | None:
+            return None if v is None else round(float(v), n)
+
         return {
             "detected": self.detected,
             "index": self.index,
-            "timestamp_ms": None if self.timestamp_ms is None else round(self.timestamp_ms, 1),
+            "timestamp_ms": r(self.timestamp_ms, 1),
             "uncertainty_ms": round(self.uncertainty_ms, 1),
-            "rate_ml_per_min": None if self.rate_ml_per_min is None else round(self.rate_ml_per_min, 3),
-            "threshold_ml_per_min": self.threshold_ml_per_min,
+            "rate_per_min": r(self.rate_per_min),
+            "threshold_per_min": self.threshold_per_min,
+            "unit": self.unit,
             "cusum_index": self.cusum_index,
             "reason": self.reason,
+            "peak_rate_any_per_min": r(self.peak_rate_any_per_min),
+            "candidates": self.candidates,
+            "blocked_by": dict(self.blocked_by),
         }
 
 
@@ -259,8 +296,16 @@ def analyse(
     window_s: float = ONSET_WINDOW_S,
     threshold: float = ONSET_RATE_ML_PER_MIN,
     motion_limit: float = MOTION_SUSPECT_PX,
+    unit: str = "ml/min",
+    cusum_min_sigma: float = ONSET_CUSUM_MIN_SIGMA_ML,
 ) -> tuple[Series, Onset]:
-    """Smooth the series, fit the rate, run the CUSUM, and pick the onset."""
+    """Smooth the series, fit the rate, run the CUSUM, and pick the onset.
+
+    Every frame whose fitted rate reached the threshold is a candidate, and the first
+    candidate that clears every gate is the onset. When none clears them, the reason
+    names the gates that stopped the candidates and how many each stopped, so a
+    reader can tell "nothing rose" from "something rose and the camera was moving".
+    """
     n = len(times_ms)
     motion_px = motion_px or [0.0] * n
     measurable = measurable if measurable is not None else [True] * n
@@ -268,9 +313,20 @@ def analyse(
     reliable = reliable if reliable is not None else [True] * n
     times_s = [t / 1000.0 for t in times_ms]
 
-    smoothed = smooth(values)
+    # Unmeasurable frames carry no value. Filling them with zero, which is what the
+    # series used to do, turns every refusal gap into a fall and every return into a
+    # rise, and the rise is a slope that has nothing to do with blood. The last
+    # measured value is held instead; the gap is still marked unmeasurable.
+    held: list[float] = []
+    last = next((v for v, m in zip(values, measurable, strict=False) if m), 0.0)
+    for v, m in zip(values, measurable, strict=False):
+        if m:
+            last = v
+        held.append(last)
+
+    smoothed = smooth(held)
     rate = windowed_rate(times_s, smoothed, window_s=window_s)
-    stat, alarm = cusum(smoothed)
+    stat, alarm = cusum(smoothed, min_sigma=cusum_min_sigma)
 
     series = Series(
         times_ms=list(times_ms),
@@ -285,68 +341,97 @@ def analyse(
     )
 
     if n < 4:
-        return series, Onset(False, reason="too few measurable frames to fit a rate")
+        return series, Onset(
+            False, threshold_per_min=threshold, unit=unit,
+            reason="too few measurable frames to fit a rate",
+        )
 
+    blocked: dict[str, int] = {}
+    candidates = 0
     for i in range(n):
-        if not measurable[i]:
-            continue
-        if motion_px[i] > motion_limit:
-            continue  # the field moved; this slope is not about bleeding
-        if not reliable[i]:
-            # The measurement at this frame is below the pool size where the
-            # false-positive floor stops mattering, and at that size the estimator's
-            # own jitter is the same order as the rate we are looking for. On a
-            # quiet synthetic case with a 900 pixel baseline pool it produced a
-            # confident onset with a peak slope of 1.19 ml/min and no bleeding in
-            # the clip at all. An onset is not declared on a number the pipeline has
-            # already flagged as unreliable; the frame still appears in the trace.
-            continue
-        if _instruments_changed(times_s, instruments, i, window_s):
-            # An instrument entering or leaving uncovers or hides part of the pool,
-            # and the measured area steps. That step has the same shape as a bleed
-            # and none of the meaning, and on a quiet synthetic case it produced a
-            # confident onset at 4.5 s where the script has no bleeding at all.
-            continue
         if rate[i] < threshold:
             continue
-        if alarm is None or i < alarm - 2:
-            continue  # the CUSUM has not confirmed a real step yet
+        candidates += 1
+        gate = _first_blocking_gate(
+            i, measurable, motion_px, reliable, times_s, instruments, window_s,
+            motion_limit, alarm,
+        )
+        if gate is not None:
+            blocked[gate] = blocked.get(gate, 0) + 1
+            continue
         return series, Onset(
             detected=True,
             index=i,
             timestamp_ms=times_ms[i],
             uncertainty_ms=window_s * 1000.0,
-            rate_ml_per_min=rate[i],
-            threshold_ml_per_min=threshold,
+            rate_per_min=rate[i],
+            threshold_per_min=threshold,
+            unit=unit,
             cusum_index=alarm,
             reason=(
-                f"slope {rate[i]:.2f} ml/min over a {window_s:.0f} s window, "
+                f"slope {rate[i]:.2f} {unit} over a {window_s:.0f} s window, "
                 f"confirmed by CUSUM at sample {alarm}"
             ),
+            peak_rate_any_per_min=max(rate),
+            candidates=candidates,
+            blocked_by=blocked,
         )
 
-    eligible = [
-        rate[i] for i in range(n)
-        if measurable[i] and reliable[i] and motion_px[i] <= motion_limit
-    ]
-    peak = max(eligible) if eligible else 0.0
-    if not eligible:
+    peak_any = max(rate) if rate else 0.0
+    if candidates == 0:
         reason = (
-            "no frame was both measurable and above the pool size where a rate "
-            "estimate means anything, so no onset was declared"
+            f"the fitted rate never reached {threshold:.2f} {unit} "
+            f"(peak {peak_any:.2f} {unit} over the whole clip)"
         )
     else:
+        parts = [
+            f"{blocked[g]} by {GATE_WORDS[g]}" for g in GATES if blocked.get(g)
+        ]
         reason = (
-            f"peak slope {peak:.2f} ml/min never reached {threshold:.2f} ml/min "
-            "on a still field with a reliable measurement"
+            f"the rate reached {threshold:.2f} {unit} on {candidates} frame"
+            f"{'s' if candidates != 1 else ''} (peak {peak_any:.2f} {unit}), and every "
+            f"one was stopped: {'; '.join(parts)}"
         )
     return series, Onset(
         False,
-        rate_ml_per_min=peak,
-        threshold_ml_per_min=threshold,
+        rate_per_min=peak_any,
+        threshold_per_min=threshold,
+        unit=unit,
         cusum_index=alarm,
         reason=reason,
+        peak_rate_any_per_min=peak_any,
+        candidates=candidates,
+        blocked_by=blocked,
     )
+
+
+def _first_blocking_gate(
+    i: int,
+    measurable: list[bool],
+    motion_px: list[float],
+    reliable: list[bool],
+    times_s: list[float],
+    instruments: list[int],
+    window_s: float,
+    motion_limit: float,
+    alarm: int | None,
+) -> str | None:
+    """The first gate, in `GATES` order, that stops frame `i` from being the onset."""
+    if not measurable[i]:
+        return GATE_UNMEASURABLE
+    if motion_px[i] > motion_limit:
+        return GATE_MOTION  # the field moved; this slope is not about bleeding
+    if not reliable[i]:
+        # Below the pool size where the false-positive floor stops mattering, the
+        # estimator's own jitter is the same order as the rate being looked for.
+        return GATE_UNRELIABLE
+    if _instruments_changed(times_s, instruments, i, window_s):
+        # An instrument entering or leaving uncovers or hides part of the pool, and
+        # the measured area steps with the same shape as a bleed.
+        return GATE_INSTRUMENTS
+    if alarm is None or i < alarm - 2:
+        return GATE_CUSUM
+    return None
 
 
 def _instruments_changed(

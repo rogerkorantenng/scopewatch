@@ -17,12 +17,15 @@ from scopewatch.config import DISMISSAL_REASONS
 # changed since the previous frame, so it runs 0 to 1, not in pixels. 0.4 is a
 # working instrument, 0.02 is one being held still.
 def features(t_s: float, *, n: int = 2, wide: float = 0.0, median: float = 50.0,
-             motion: float = 0.4, measurable: bool = True) -> phase.PhaseFeatures:
+             motion: float = 0.4, measurable: bool = True,
+             widths: int = 2) -> phase.PhaseFeatures:
+    """`wide` sets the widest edge width in the frame; `median` the narrowest."""
     return phase.PhaseFeatures(
         timestamp_ms=t_s * 1000.0,
         instrument_count=n,
-        max_shaft_width_px=wide or median,
-        median_shaft_width_px=median,
+        widest_px=wide or median,
+        narrowest_px=median,
+        widths_in_frame=widths if n else 0,
         blood_fraction=0.01,
         tip_motion_px=motion,
         measurable=measurable,
@@ -55,6 +58,42 @@ def test_a_wide_device_after_sustained_dissection_is_the_critical_approach():
     frames += [features(30.0 + i * 0.25, wide=100.0) for i in range(24)]
     track = phase.infer(frames)
     assert "critical_approach" in track.labels
+
+
+def test_the_dwell_timer_alone_never_reaches_the_critical_approach():
+    """Real footage: five clips entered critical_approach 20 s after dissection began,
+    because the old cue was true on most frames anyway. Ten minutes of dissection
+    with no wide instrument in the picture must never get there."""
+    frames = [features(i * 0.25) for i in range(2400)]
+    track = phase.infer(frames)
+    assert "critical_approach" not in track.labels
+
+
+def test_a_flared_single_shaft_is_not_a_wide_device():
+    """The old cue compared a shaft's 95th-percentile width with the median of 50th
+    percentiles. One ordinary shaft passed that on 70-89% of real frames."""
+    frames = [features(i * 0.25) for i in range(120)]
+    frames += [features(30.0 + i * 0.25, wide=60.0, median=50.0) for i in range(80)]
+    track = phase.infer(frames)
+    assert "critical_approach" not in track.labels
+
+
+def test_a_wide_blip_shorter_than_the_persistence_does_not_count():
+    frames = [features(i * 0.25) for i in range(120)]
+    frames += [features(30.0 + i * 0.25, wide=100.0) for i in range(3)]  # 0.75 s
+    frames += [features(30.75 + i * 0.25) for i in range(40)]
+    track = phase.infer(frames)
+    assert "critical_approach" not in track.labels
+
+
+def test_the_wide_cue_before_the_dwell_is_counted_for_the_record():
+    frames = [features(i * 0.25, wide=100.0) for i in range(20)]
+    runner = phase.PhaseRunner()
+    for f in frames:
+        runner.push(f)
+    cue = runner.finish().wide_cue
+    assert cue["frames_with_cue_before_armed"] == 20
+    assert cue["seen_wide"] is False
 
 
 def test_the_approach_gives_way_to_division_after_its_window():
@@ -107,6 +146,14 @@ def test_the_checkpoint_is_held_only_after_the_phase_persists():
     loop.observe(observation(11.8, "critical_approach"))
     assert loop.state == agent.HELD
     assert loop.open_checkpoint is not None
+
+
+def test_with_the_checkpoint_switched_off_nothing_is_held():
+    loop = agent.AgentLoop()
+    for t in (10.0, 11.0, 12.0, 14.0):
+        loop.observe(observation(t, "critical_approach", checkpoint_enabled=False))
+    assert loop.state == agent.OBSERVING
+    assert not loop.checkpoints
 
 
 def test_leaving_the_phase_releases_a_candidate_without_holding():

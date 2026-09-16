@@ -281,7 +281,7 @@ def _draw_instrument(
         int(w * (0.46 + 0.16 * (index % 2)) + spec.tip_offset_px),
         int(h * (0.44 + 0.1 * (index % 3)) + spec.tip_offset_px * 0.6),
     )
-    thickness = max(2, int(round(width_px)))
+    thickness = max(2, round(width_px))
     # The shaded side of the cylinder is part of the shaft, so it is drawn inside
     # the nominal width: the total visible width is exactly `thickness`, which is
     # what the ground truth says and what the detector has to recover.
@@ -310,17 +310,22 @@ def _draw_instrument(
     return towards
 
 
-def _speculars(canvas: np.ndarray, rng: np.random.Generator, spec: SceneSpec, aperture: np.ndarray) -> None:
+def _speculars(
+    canvas: np.ndarray, rng: np.random.Generator, spec: SceneSpec, aperture: np.ndarray
+) -> None:
     for _ in range(spec.speculars):
         x = int(rng.integers(int(spec.width * 0.2), int(spec.width * 0.8)))
         y = int(rng.integers(int(spec.height * 0.2), int(spec.height * 0.8)))
         if not aperture[y, x]:
             continue
         axes = (int(rng.integers(3, 11)), int(rng.integers(2, 7)))
-        cv2.ellipse(canvas, (x, y), axes, float(rng.uniform(0, 180)), 0, 360, (252, 252, 250), -1, cv2.LINE_AA)
+        angle = float(rng.uniform(0, 180))
+        cv2.ellipse(canvas, (x, y), axes, angle, 0, 360, (252, 252, 250), -1, cv2.LINE_AA)
 
 
-def _occlude(canvas: np.ndarray, mask: np.ndarray, spec: SceneSpec, aperture: np.ndarray) -> np.ndarray:
+def _occlude(
+    canvas: np.ndarray, mask: np.ndarray, spec: SceneSpec, aperture: np.ndarray
+) -> np.ndarray:
     """A swab across the field. Flat, bright, textureless: what the gate looks for."""
     if spec.occlusion <= 0:
         return mask

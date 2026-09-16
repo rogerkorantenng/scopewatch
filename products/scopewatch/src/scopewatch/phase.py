@@ -27,12 +27,37 @@ from typing import Any
 from .config import PHASE_MIN_DWELL_S, PHASES
 
 # A wide device entering a field that has been dissecting is the strongest single
-# cue that clips are about to be applied: a 10 mm clip applier against 5 mm working
-# instruments is twice the shaft width.
-WIDE_DEVICE_RATIO = 1.55
+# cue this module has that clips are about to be applied: a 10 mm clip applier
+# against 5 mm working instruments is twice the shaft width.
+#
+# What real footage showed about this cue, and why it is now built the way it is.
+# The first version compared the 95th-percentile mask width of any shaft in the frame
+# against the running median of every shaft's 50th-percentile width. Those are
+# different statistics, and a single ordinary shaft's p95 sits well above the median
+# of p50s: on three real clips the cue was true on 70, 72 and 89 per cent of
+# measurable frames *before* the dwell had armed it. So the checkpoint fired on the
+# first frame after 20 s of "dissection", on five clips between 26.4 and 27.8 s. The
+# timer was the trigger and the picture was not. The mask widths were also half-shaft
+# stripes (see `instruments.edge_width`), and on the Barroso hernia clip the "wide
+# device" was pale peritoneum that passed the steel colour test.
+#
+# Now: the cue compares edge-to-edge widths, the same statistic on both sides: either
+# two separate instruments in the same frame, or one instrument against the running
+# median of the edge widths this case has already seen. It must hold for
+# WIDE_PERSIST_S of frames that show instruments before it counts. The dwell only
+# arms it; the dwell can never set it. Even so, two 5 mm instruments at different
+# distances from the lens differ in apparent width by more than 1.7x, so on real
+# video this cue cannot tell a clip applier from a near grasper. That is why the
+# automatic checkpoint is off by default (`PipelineParams.auto_checkpoint`) and the
+# interface says it is experimental.
+WIDE_DEVICE_RATIO = 1.7
+WIDE_PERSIST_S = 1.5
+# Edge widths the case must have seen before "wider than usual" means anything.
+WIDE_HISTORY_MIN = 20
 
 # How long sustained two-instrument work must run before the approach to the
-# irreversible step is plausible. Below this we are still exposing.
+# irreversible step is plausible. Below this we are still exposing. This arms the
+# wide-device cue; on its own it triggers nothing.
 DISSECTION_DWELL_S = 20.0
 
 # The share of the steel mask that changes between frames. Above this the
@@ -52,21 +77,30 @@ CRITICAL_APPROACH_S = 10.0
 
 @dataclass
 class PhaseFeatures:
-    """The five numbers the phase rules read. All of them are already measured."""
+    """The numbers the phase rules read. All of them are already measured."""
 
     timestamp_ms: float
     instrument_count: int
-    max_shaft_width_px: float
-    median_shaft_width_px: float
+    widest_px: float  # the widest qualified edge width in this frame
+    narrowest_px: float  # the narrowest, from a separate entry in the same frame
     blood_fraction: float
     tip_motion_px: float
     measurable: bool = True
+    widths_in_frame: int = 0
+    usual_width_px: float = 0.0  # running median of earlier edge widths in this case
+    usual_width_samples: int = 0
 
     @property
     def wide_device(self) -> bool:
-        if self.median_shaft_width_px <= 0 or self.instrument_count < 1:
-            return False
-        return self.max_shaft_width_px >= WIDE_DEVICE_RATIO * self.median_shaft_width_px
+        if (
+            self.widths_in_frame >= 2
+            and self.narrowest_px > 0
+            and self.widest_px >= WIDE_DEVICE_RATIO * self.narrowest_px
+        ):
+            return True
+        if self.widths_in_frame >= 1 and self.usual_width_samples >= WIDE_HISTORY_MIN:
+            return self.widest_px >= WIDE_DEVICE_RATIO * self.usual_width_px
+        return False
 
 
 @dataclass
@@ -99,6 +133,7 @@ class PhaseTrack:
     labels: list[str] = field(default_factory=list)
     raw_labels: list[str] = field(default_factory=list)
     spans: list[PhaseSpan] = field(default_factory=list)
+    wide_cue: dict[str, Any] = field(default_factory=dict)
 
     def at(self, index: int) -> str:
         if not self.labels:
@@ -110,6 +145,8 @@ class PhaseTrack:
             "labels": list(self.labels),
             "spans": [s.to_dict() for s in self.spans],
             "order": list(PHASES),
+            "wide_cue": dict(self.wide_cue),
+            "validated_on": "scripted synthetic sequences only; not on real operative video",
         }
 
 
@@ -170,6 +207,10 @@ class PhaseRunner:
         self.dissection_s = 0.0
         self.seen_wide = False
         self.wide_s = 0.0
+        self.wide_run_s = 0.0
+        self.wide_cue_frames = 0
+        self.wide_cue_frames_unarmed = 0
+        self.measurable_frames_unarmed = 0
         self.accepted = "preparation"
         self._pending: str | None = None
         self._pending_since = 0.0
@@ -182,10 +223,22 @@ class PhaseRunner:
             self._previous_ms = f.timestamp_ms
         dt = max(0.0, (f.timestamp_ms - self._previous_ms) / 1000.0)
         self._previous_ms = f.timestamp_ms
-        # A wide device only counts once the field has actually been dissecting.
-        # A 10 mm port trocar in view during access is not a clip applier, and
-        # treating it as one would hold a checkpoint before the operation starts.
-        if f.measurable and f.wide_device and self.dissection_s >= DISSECTION_DWELL_S:
+        armed = self.dissection_s >= DISSECTION_DWELL_S
+        cue = bool(f.measurable and f.wide_device)
+        if f.measurable and not armed:
+            self.measurable_frames_unarmed += 1
+            self.wide_cue_frames_unarmed += int(cue)
+        self.wide_cue_frames += int(cue)
+        # The cue must persist in the picture; a frame without it resets the run.
+        # Unmeasurable frames neither extend nor break it.
+        if cue:
+            self.wide_run_s += dt
+        elif f.measurable and f.widths_in_frame:
+            self.wide_run_s = 0.0  # instruments measured, and none of them wide
+        # A wide device only counts once the field has actually been dissecting. A
+        # 10 mm port trocar in view during access is not a clip applier. The dwell
+        # arms the cue; only the cue, held for WIDE_PERSIST_S, sets it.
+        if armed and cue and self.wide_run_s >= WIDE_PERSIST_S:
             self.seen_wide = True
         if self.seen_wide:
             self.wide_s += dt
@@ -223,6 +276,12 @@ class PhaseRunner:
 
     def finish(self) -> PhaseTrack:
         self.track.spans = spans_from(self.track.labels, self._times)
+        self.track.wide_cue = {
+            "frames_with_cue": self.wide_cue_frames,
+            "frames_with_cue_before_armed": self.wide_cue_frames_unarmed,
+            "measurable_frames_before_armed": self.measurable_frames_unarmed,
+            "seen_wide": self.seen_wide,
+        }
         return self.track
 
 

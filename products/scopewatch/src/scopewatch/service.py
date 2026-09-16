@@ -91,7 +91,7 @@ def detector() -> YoloxDetector | None:
         return _detector
     try:
         _detector = YoloxDetector(cache_dir=MODEL_DIR)
-    except Exception as exc:  # noqa: BLE001 - any failure here is non-fatal
+    except Exception as exc:
         _detector_error = str(exc)
         _detector = None
     return _detector
@@ -112,10 +112,11 @@ def _params_from(raw: dict[str, Any]) -> PipelineParams:
         "mm_per_px",
         "film_depth_mm",
         "onset_rate_ml_per_min",
+        "onset_rate_pct_per_min",
     ):
         if raw.get(key) not in (None, ""):
             setattr(params, key, type(getattr(params, key) or 0.0)(raw[key]))
-    for key in ("use_dnn", "rescan", "safety_view_established"):
+    for key in ("use_dnn", "rescan", "safety_view_established", "auto_checkpoint"):
         if key in raw:
             value = raw[key]
             setattr(params, key, value if isinstance(value, bool) else str(value).lower() in
@@ -183,11 +184,12 @@ PRODUCT = ProductInfo(
     tagline="Measures the operating field instead of leaving it to the eye.",
     description=(
         "Scopewatch watches the laparoscopic camera that is already in the room. It "
-        "estimates the blood on the field with an uncertainty range, timestamps when "
-        "the rate of change crosses a threshold, infers the operative phase from the "
-        "instruments and the scene, and holds a safety checkpoint a person must "
-        "answer before the irreversible step. It is decision support and a "
-        "retrospective measurement instrument. It is not a medical device."
+        "measures how much of the visible field is covered in blood and how fast that "
+        "share is changing, timestamps when the change crosses a threshold, and refuses "
+        "frames it cannot read, including video that is not laparoscopic. A volume in "
+        "millilitres is shown only when the instrument-shaft scale holds steady across "
+        "the case, and it has never been validated on real footage. It is a "
+        "retrospective measurement instrument, not a medical device."
     ),
     accent="#FF8A3D",
     version=__version__,
@@ -230,6 +232,14 @@ PARAMS_SCHEMA: list[dict[str, Any]] = [
         "type": "boolean",
         "default": False,
         "help": "Tick this and no checkpoint is raised.",
+    },
+    {
+        "name": "auto_checkpoint",
+        "label": "Automatic safety checkpoint (experimental)",
+        "type": "boolean",
+        "default": False,
+        "help": "Off by default. Its cue is instrument width, and on real video a "
+                "grasper near the lens looks as wide as a clip applier.",
     },
     {
         "name": "use_dnn",

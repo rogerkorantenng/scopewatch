@@ -10,7 +10,7 @@ const $ = (sel, root = document) => root.querySelector(sel);
 const $$ = (sel, root = document) => Array.from(root.querySelectorAll(sel));
 
 const state = {
-  jobId: null, record: null, agent: null, sample: null,
+  jobId: null, record: null, agent: null, sample: null, evaluation: null,
   videoUrl: null, events: [], evidence: [], geom: null, closeStream: null, polling: null,
   cursorMs: 0, decodable: true,
 };
@@ -27,6 +27,10 @@ const REFUSALS = {
   EXPOSURE_CLIPPED: ['the frame is clipped', 'Lower the light source; the sensor is saturating.'],
   NO_SCALE_REFERENCE: ['no instrument shaft in view, so no scale',
     'Bring an instrument shaft into view for a few seconds, or set millimetres per pixel directly.'],
+  SCALE_INCONSISTENT: ['the shaft scale wandered too much across the case',
+    'The blood-covered share still stands. A volume needs a scale that holds steady; set millimetres per pixel directly if you know it.'],
+  OUT_OF_DOMAIN: ['not a laparoscopic view of the abdomen',
+    'Scopewatch reads laparoscopic video from inside the abdomen. Open surgery, drapes and gloved hands are refused.'],
   NO_USABLE_FRAMES: ['no frame in the clip was good enough to measure',
     'Submit a clip with the scope inside the cavity and the light on.'],
   DECODE_FAILED: ['the file could not be decoded as video', 'Submit an MP4, AVI or MOV the decoder can open.'],
@@ -75,11 +79,16 @@ async function boot() {
     if (!res.ok) throw new Error(state.sample?.error?.message || 'no sample');
     const mb = (state.sample.bytes / 1048576).toFixed(1);
     $('#sample-line').textContent =
-      `${state.sample.filename}, ${mb} MB. A synthetic case whose bleed onset, fog window and scale are known by construction.`;
+      `${state.sample.filename}, ${mb} MB. A synthetic case whose bleed onset, fog window and scale are known by construction. Real clips read differently; the evaluation says how.`;
   } catch {
     $('#sample-line').textContent = 'No sample clip is bundled in this image. Choose a clip of your own.';
     $('#run-sample').disabled = true;
   }
+
+  try {
+    const res = await fetch('/api/evaluation');
+    if (res.ok) state.evaluation = await res.json();
+  } catch { /* the page works without it */ }
 
   const cost = $('#railfoot').dataset.cost || '';
   const [inst, rate] = cost.split('—').map((s) => s.trim());
@@ -226,11 +235,11 @@ function hideError() { $('#errbox').hidden = true; }
 
 /* ────────────────────────── rendering ────────────────────────── */
 function renderEmpty() {
-  $('#kpis').innerHTML = ['Blood on the field, peak', 'Cumulative observed loss', 'Bleeding onset',
+  $('#kpis').innerHTML = ['Blood-covered field, peak', 'Blood on the field, volume', 'Bleeding onset',
     'Frames measurable', 'Safety checkpoint']
     .map((k) => `<div class="kpi"><div class="k">${esc(k)}</div><div class="v faint">not measured</div>
       <div class="n">no case has been analysed yet</div></div>`).join('');
-  $('#cr-body').innerHTML = `<p style="padding:11px 13px;color:var(--fg-faint)">No checkpoint has been raised. One appears here when the phase reaches the irreversible step without a recorded safety view.</p>`;
+  $('#cr-body').innerHTML = `<p style="padding:11px 13px;color:var(--fg-faint)">No checkpoint has been raised. The automatic checkpoint is experimental and off by default: on real video its cue, instrument width, cannot tell a clip applier from a grasper nearer the lens.</p>`;
   $('#ev-body').innerHTML = `<tr><td colspan="3" class="faint">The log fills with the agent's own transitions once a case has run.</td></tr>`;
   $('#in-body').innerHTML = `<div class="cell"><h3>Cost of a run</h3>
     <div class="kv"><span>Instance</span><span>${esc($('#st-inst').textContent)}</span></div>
@@ -298,7 +307,7 @@ function renderHead(rec, cannot) {
   } else {
     $('#page-title').textContent = 'Live field';
     $('#page-lede').textContent =
-      'Blood on the visible field, measured frame by frame. Phase, instruments, scale and the safety checkpoint all come from the same pass.';
+      'The share of the visible field covered in blood, measured frame by frame, and how fast it changes. A volume appears only when the instrument scale holds steady, and no volume has been validated on real footage.';
   }
   if (rec.warnings?.length) {
     $('#page-lede').textContent += ` ${rec.warnings[0]}`;
@@ -326,19 +335,31 @@ function renderCannot(rec, cannot) {
     : '<p class="faint">No frame carried a refusal code.</p>';
 }
 
+function realSegmentationLine() {
+  const seg = state.evaluation?.real?.segmentation?.after?.test;
+  if (!seg || seg.precision == null) return '';
+  return ` On hand-labelled frames from held-out real clips: precision ${num(seg.precision * 100, 0)}%, recall ${num(seg.recall * 100, 0)}%.`;
+}
+
 function renderKpis(rec) {
   const rows = rec.results || [];
   $('#kpis').innerHTML = rows.map((r) => {
     let value, unit = r.unit ? `<u>${esc(r.unit)}</u>` : '', cls = '', note = r.note || '';
     if (r.label === 'Safety checkpoint') {
+      if (r.value === 'off') {
+        return `<div class="kpi"><div class="k">${esc(r.label)}</div>
+          <div class="v faint">Off</div><div class="n">${esc(note)}</div></div>`;
+      }
       const st = state.agent?.state || r.value;
       value = sentence(st); unit = '';
       cls = st === 'held' ? 'hot' : (st === 'confirmed' ? 'good' : '');
       const cp = openCheckpoint();
-      note = cp ? `held at ${clock(cp.at_ms)}, frame ${cp.frame_index}, waiting on a person`
+      note = cp ? `held at ${clock(cp.at_ms)}, frame ${cp.frame_index}, waiting on a person. Experimental.`
         : (state.agent?.checkpoints?.length ? decidedLine(state.agent.checkpoints.slice(-1)[0]) : note);
+    } else if (r.status === 'CANNOT_MEASURE') {
+      return `<div class="kpi"><div class="k">${esc(r.label)}</div>
+        <div class="v faint warnfg">Cannot measure</div><div class="n">${esc(note.replace(/^CANNOT_MEASURE: /, ''))}</div></div>`;
     } else if (!r.measured || r.value == null) {
-      value = 'not measured'; unit = '';
       return `<div class="kpi"><div class="k">${esc(r.label)}</div>
         <div class="v faint">not measured</div><div class="n">${esc(note)}</div></div>`;
     } else if (r.label === 'Bleeding onset') {
@@ -349,8 +370,9 @@ function renderKpis(rec) {
       value = sentence(r.value); unit = '';
     } else {
       value = num(r.value, r.unit === '%' ? 1 : (r.value < 10 ? 2 : 1));
-      if (r.low != null && r.high != null) note = `${num(r.low, 2)} to ${num(r.high, 2)} ${r.unit} — ${note}`;
+      if (r.low != null && r.high != null) note = `${num(r.low, 2)} to ${num(r.high, 2)} ${r.unit}. ${note}`;
       if (r.label === 'Frames measurable') cls = r.value >= 50 ? 'good' : '';
+      if (r.label.startsWith('Blood-covered')) note = `${note}.${realSegmentationLine()}`;
     }
     return `<div class="kpi ${cls}"><div class="k">${esc(r.label)}</div>
       <div class="v">${esc(value)}${unit}</div><div class="n">${esc(note)}</div></div>`;
@@ -472,7 +494,7 @@ const ACTION_TEXT = {
 };
 const ACTION_VALUE = {
   rescan_window: (d, a) => a.result?.frames_read != null ? `${a.result.frames_read} frames` : `stride ${d.stride}`,
-  record_onset: (d) => d.volume_ml != null ? `${num(d.volume_ml, 2)} ml` : 'recorded',
+  record_onset: (d) => d.field_fraction != null ? `${num(d.field_fraction * 100, 1)}% of field` : 'recorded',
   request_clean_lens: () => 'suppressed',
   hold_checkpoint: () => 'held',
   resume: () => 'observing',
@@ -486,8 +508,8 @@ function buildEvents(rec) {
   if (onset?.detected) {
     out.push({
       ms: onset.timestamp_ms, cls: 'hotfg',
-      text: `Bleeding onset — rate crossed ${num(onset.threshold_ml_per_min, 2)} ml/min`,
-      value: `${num(onset.rate_ml_per_min, 2)} ml/min`,
+      text: `Bleeding onset — rate crossed ${num(onset.threshold_per_min, 1)} ${onset.unit || ''}`,
+      value: `${num(onset.rate_per_min, 1)} ${onset.unit || ''}`,
     });
   }
   (agent.actions || []).forEach((a) => {
@@ -658,14 +680,18 @@ function renderInstruments(rec) {
   const counts = (rec.evidence || []).map((e) => e.metrics?.instruments?.count).filter((n) => n != null);
   const maxCount = counts.length ? Math.max(...counts) : 0;
 
-  $('#in-sub').textContent = scale.source
-    ? `scale from ${String(scale.source).replace(/_/g, ' ')}`
-    : 'no scale reference';
+  const gate = scale.gate || {};
+  $('#in-sub').textContent = gate.passed
+    ? `scale from ${String(scale.source).replace(/_/g, ' ')}, gate passed`
+    : `volume withheld: ${String(gate.reason_code || 'no scale').replace(/_/g, ' ').toLowerCase()}`;
 
   $('#in-body').innerHTML = `
     <div class="cell"><h3>Scale</h3>
-      <div class="kv"><span>Millimetres per pixel</span><span>${scale.mm_per_px != null ? `${num(scale.mm_per_px, 5)} ± ${num(scale.mm_per_px_sigma, 5)}` : 'not recovered'}</span></div>
-      <div class="kv"><span>Source</span><span>${esc(sentence(scale.source || 'none'))}</span></div>
+      <div class="kv"><span>Millimetres per pixel</span><span>${scale.mm_per_px != null ? `${num(scale.mm_per_px, 4)} ± ${num(scale.mm_per_px_sigma, 4)}` : 'not recovered'}</span></div>
+      <div class="kv"><span>Scale gate</span><span>${esc(sentence(gate.status || 'none'))}${gate.passed ? '' : ' — volume withheld'}</span></div>
+      <div class="kv"><span>Frames with a shaft scale</span><span>${gate.frames_with_scale ?? 0} of ${gate.measurable_frames ?? 0}</span></div>
+      <div class="kv"><span>Scale variation across the case</span><span>${gate.robust_cv != null ? `${num(gate.robust_cv * 100, 0)}% (limit ${num((gate.max_robust_cv || 0) * 100, 0)}%)` : '—'}</span></div>
+      <div class="kv"><span>Implied field width</span><span>${scale.implied_field_width_mm != null ? `${num(scale.implied_field_width_mm, 0)} mm` : '—'}</span></div>
       <div class="kv"><span>Assumed shaft</span><span>${num(scale.assumed_shaft_mm, 1)} mm</span></div>
       <div class="kv"><span>Instruments in view, peak</span><span>${maxCount}</span></div>
     </div>
@@ -715,6 +741,7 @@ function renderPhases(rec) {
   const spans = p?.spans || [];
   if (!spans.length) { host.innerHTML = ''; return; }
   const open = openCheckpoint();
+  host.setAttribute('aria-label', 'Operative phases, experimental: validated on scripted synthetic sequences only');
   host.innerHTML = spans.map((s) => {
     const now = open && open.at_ms >= s.start_ms && open.at_ms <= s.end_ms;
     return `<button type="button" class="pz seek ${now ? 'now' : 'done'}" role="listitem" data-ms="${s.start_ms}"
@@ -744,8 +771,9 @@ function drawTrace() {
   const t0 = s.times_ms[0], t1 = s.times_ms[s.times_ms.length - 1] || t0 + 1;
   const span = Math.max(1, t1 - t0);
   const peak = Math.max(...s.smoothed, 0);
-  const flat = peak <= 0;   // nothing measurable: a zeroed axis would be a lie
-  const vmax = Math.max(0.001, peak * 1.18);
+  // Nothing measurable: a zeroed axis would be a lie. A measured 0% is not that.
+  const flat = !s.measurable.some(Boolean);
+  const vmax = Math.max(0.5, peak * 1.18);
   const x0 = L, x1 = W - R, yT = TOP, yB = H - BOT;
   const X = (t) => x0 + ((t - t0) / span) * (x1 - x0);
   const Y = (v) => yB - (Math.max(0, v) / vmax) * (yB - yT);
@@ -763,7 +791,7 @@ function drawTrace() {
   parts.push(`<g stroke="#24352F" stroke-width="1" fill="none"><path d="${rules}"/><path d="${verticals}"/></g>`);
   if (!flat) {
     parts.push(`<g font-family="Archivo" font-size="14" fill="#7F968F">${
-      ticks.map((f) => `<text x="4" y="${(Y(vmax * f) + 4.5).toFixed(1)}">${num(vmax * f, 2)}</text>`).join('')}</g>`);
+      ticks.map((f) => `<text x="4" y="${(Y(vmax * f) + 4.5).toFixed(1)}">${num(vmax * f, 1)}%</text>`).join('')}</g>`);
   }
 
   // gaps, drawn before the line so the line sits on top
@@ -820,7 +848,7 @@ function drawTrace() {
     parts.push(`<text x="${(lx + 8).toFixed(1)}" y="${ly + 14}" font-family="Archivo" font-size="14" font-weight="700" fill="#0B1210">${esc(label)}</text>`);
   }
 
-  parts.push(`<text x="${x0 + 6}" y="${yT + 14}" font-family="Archivo" font-size="14" fill="#9DB3AC">Blood on the field, ml</text>`);
+  parts.push(`<text x="${x0 + 6}" y="${yT + 14}" font-family="Archivo" font-size="14" fill="#9DB3AC">Blood-covered field, % of view</text>`);
   if (flat) {
     parts.push(`<text x="${((x0 + x1) / 2).toFixed(1)}" y="${((yT + yB) / 2 + 5).toFixed(1)}" text-anchor="middle"
       font-family="Archivo" font-size="14" font-weight="600" fill="#E8C25A">No frame in this clip could be measured, so the trace carries no line</text>`);
@@ -833,7 +861,7 @@ function drawTrace() {
       return `<text x="${x.toFixed(1)}" y="${H - 4}" text-anchor="${anchor}">${clock(t)}</text>`;
     }).join('')}</g>`);
 
-  const summary = `The field trace: blood on the visible field from ${clock(t0)} to ${clock(t1)}, peak ${num(vmax / 1.18, 2)} ml${
+  const summary = `The field trace: share of the visible field covered in blood from ${clock(t0)} to ${clock(t1)}, peak ${num(peak, 1)} per cent${
     onset?.detected ? `, onset marked at ${clock(onset.timestamp_ms)}` : ', no onset detected'}.`;
   host.innerHTML = `<svg viewBox="0 0 ${W} ${H}" width="${W}" height="${H}" role="img" aria-label="${esc(summary)}">${parts.join('')}</svg>`;
 }

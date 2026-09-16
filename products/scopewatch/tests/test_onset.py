@@ -112,8 +112,33 @@ def test_the_onset_lands_near_the_step_with_its_window_as_uncertainty():
     assert result.detected
     assert result.timestamp_ms == pytest.approx(10_000.0, abs=4_000.0)
     assert result.uncertainty_ms == 4_000.0
-    assert result.rate_ml_per_min >= 0.35
+    assert result.rate_per_min >= 0.35
     assert len(series.smoothed) == len(values)
+
+
+def test_when_a_gate_stops_the_alarm_the_reason_names_the_gate_not_the_threshold():
+    """Real footage: three clips had slopes of 17.87, 19.13 and 98.11 ml/min against a
+    0.35 threshold, and the reason still said the slope "never reached" it."""
+    times, values = ramp(start_index=40, slope_per_s=0.03)
+    motion = [30.0] * len(times)  # the camera is moving the whole time
+    _series, result = onset.analyse(times, values, motion_px=motion, threshold=0.35)
+    assert not result.detected
+    assert "never reached" not in result.reason
+    assert result.candidates > 0
+    assert result.blocked_by.get(onset.GATE_MOTION) == result.candidates
+    assert "camera was moving" in result.reason
+
+
+def test_a_refusal_gap_is_not_a_fall_and_a_rise():
+    """Unmeasurable frames used to enter the series as zero, which turned every gap
+    into a slope. All 32 candidate frames on the Kavalakat clip had one in the window."""
+    times = [i * 250.0 for i in range(120)]
+    values = [2.0] * 120
+    measurable = [not (40 <= i < 60) for i in range(120)]
+    for i in range(40, 60):
+        values[i] = 0.0
+    _series, result = onset.analyse(times, values, measurable=measurable, threshold=0.35)
+    assert result.candidates == 0, result.reason
 
 
 def test_a_flat_series_produces_no_onset_and_says_why():

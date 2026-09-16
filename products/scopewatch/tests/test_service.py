@@ -63,7 +63,8 @@ def test_config_offers_the_parameters_the_ui_needs():
     r = client.get("/api/config")
     assert r.status_code == 200
     names = {p["name"] for p in r.json()["params"]}
-    assert {"stride", "shaft_mm", "film_depth_mm", "safety_view_established"} <= names
+    assert {"stride", "shaft_mm", "film_depth_mm", "safety_view_established",
+            "auto_checkpoint"} <= names
 
 
 def test_the_product_says_plainly_what_it_is_not():
@@ -244,8 +245,10 @@ def _run_sample_job(client: TestClient) -> None:
     # The agent loop has to have produced something. A record with an empty loop is
     # the failure mode a recording of this product would show as a blank event log.
     agent = result["metrics"]["agent"]
-    assert agent["transitions"], "the agent loop logged no transitions"
-    assert agent["checkpoints"], "the wide device entered and no checkpoint was raised"
-    assert agent["open_checkpoint"], "the checkpoint resolved itself, which it must not"
+    assert agent["actions"], "the agent loop took no action"
+    # The automatic checkpoint is experimental and off unless asked for.
+    assert not agent["checkpoints"]
+    assert result["metrics"]["checkpoint"]["automatic"] is False
     assert result["evidence"], "no evidence frames were saved"
     assert result["metrics"]["onset"]["detected"], "the bleed in the sample was missed"
+    assert result["metrics"]["blood"]["primary"] == "field_fraction"

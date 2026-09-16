@@ -39,7 +39,11 @@ def test_the_shaft_width_matches_what_was_drawn(clean_scene):
     assert error < 0.05, f"shaft width {np.median(widths):.1f} px against a true {truth:.1f} px"
 
 
-def test_the_scale_is_recovered_to_within_two_percent():
+def test_the_scale_is_recovered_to_within_three_percent():
+    """Three, not two. The scale now comes from the edge-to-edge saturation profile,
+    which reads the anti-aliased fringe of a drawn line as shaft (-2.0 to -2.5% here).
+    The medial-axis width it replaced was -0.3% on this renderer and about half the
+    true width on real footage."""
     errors = []
     for seed in (3, 11, 29, 47):
         scene = render(SceneSpec(pool_area_px=12_000, seed=seed))
@@ -47,7 +51,7 @@ def test_the_scale_is_recovered_to_within_two_percent():
         reading, _ = instruments.read_frame(scene.image, lit, assumed_shaft_mm=5.0)
         assert reading.mm_per_px is not None
         errors.append(abs(reading.mm_per_px - scene.spec.mm_per_px) / scene.spec.mm_per_px)
-    assert max(errors) < 0.02, f"worst scale error {max(errors):.2%}"
+    assert max(errors) < 0.03, f"worst scale error {max(errors):.2%}"
 
 
 def test_no_scale_when_nothing_of_known_size_is_in_view(no_instrument_scene):
@@ -71,7 +75,7 @@ def test_the_field_boundary_is_the_circle_not_the_rectangle(clean_scene):
     pixels short of the frame edge."""
     lit = field_mask(clean_scene.image)
     ring = instruments.field_boundary(lit, lit.shape)
-    ys, xs = np.nonzero(ring)
+    _ys, xs = np.nonzero(ring)
     assert xs.min() > 5, "the ring is hugging the image edge, not the aperture"
     assert xs.max() < lit.shape[1] - 5
 
@@ -148,7 +152,7 @@ def test_the_dnn_channel_runs_and_says_what_it_is(clean_scene):
     model_dir = Path(__file__).resolve().parents[1] / "models"
     try:
         detector = YoloxDetector(cache_dir=model_dir)
-    except Exception as exc:  # noqa: BLE001
+    except Exception as exc:
         pytest.skip(f"YOLOX model unavailable: {exc}")
     objects = instruments.dnn_objects(detector, clean_scene.image)
     assert isinstance(objects, list)
