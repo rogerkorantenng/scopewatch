@@ -184,7 +184,8 @@ number.** See section 8.
 
 Full diagrams in [architecture.md](architecture.md). In prose:
 
-A clip is decimated and read frame by frame. Each frame passes four quality gates
+A clip is decimated and read frame by frame. Each frame passes five quality gates (focus, fog, occlusion, exposure clipping and
+out of domain)
 before anything measures it, and a frame that fails a gate produces a named refusal
 rather than a number. A frame that passes has its instrument shafts found, and a shaft
 crossing the edge of the projected circle supplies a scale, because laparoscopic shafts
@@ -580,7 +581,7 @@ set before the pixels exist. Evidence about the arithmetic, none about tissue. T
 real-footage changes made these numbers worse, and Part B says so: pools under 0.4% of
 the field are dropped, the volume interval contains the truth in 39 of 48 scenes
 (81%) instead of 48 of 48, and per-frame time at 960 x 540 went from 38.8 ms to
-142.9 ms (measured while other jobs shared the machine).
+142.9 ms (3.7×, measured while other jobs shared the machine).
 
 **What was not measured.** No real clip has a known blood volume, so no volume accuracy
 on real footage exists or is claimed. No clinical dataset with expert labels was used;
@@ -611,8 +612,9 @@ and the README carries that as an open item.
    record and here.
 8. **Small pools are dropped.** Blood covering under 0.4% of the field is not reported,
    because on real dev frames components that small were mostly red tissue. On
-   synthetic scenes that drops every 400 px pool, and volume-interval coverage fell
-   from 48 of 48 scenes to 39 of 48.
+   synthetic scenes that drops every 400 px pool (0.2% of the field) entirely, mean
+   area error moved from -0.98% to -19.9%, and volume-interval coverage fell from 48 of
+   48 scenes to 39 of 48 (81%); the nine misses are the dropped small pools.
 9. **Phase inference is validated only on scripted synthetic sequences**, and its
    width cue is fooled on real video by an instrument's distance from the lens. The
    automatic checkpoint that depends on it is off by default.
@@ -648,9 +650,9 @@ resolves itself. The service refuses an anonymous confirmation, and refuses a di
 that carries no reason; both refusals are tested. Feeding a held checkpoint a hundred
 further frames leaves it held, and there is a test for that too.
 
-**It refuses rather than guesses.** Four quality gates and a scale gate mean that a
-fogged lens, a defocused scope, an occluded field or a frame with nothing of known size
-in it produces a named refusal and no number. That behaviour is the feature. A tool
+**It refuses rather than guesses.** Five quality gates and a scale gate mean that a
+fogged lens, a defocused scope, an occluded field, clipped exposure, video that is not
+laparoscopic, or a frame with nothing of known size in it produces a named refusal and no number. That behaviour is the feature. A tool
 that reports through smoke is worse than one that stops.
 
 **No identifiable people, anywhere.** The sample media are synthetic scenes drawn with

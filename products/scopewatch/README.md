@@ -16,7 +16,7 @@ because of them. The full account is Part A of [docs/evaluation.md](docs/evaluat
 ever been checked against a real one.** The fixes also made the synthetic numbers
 worse: pools under 0.4% of the field are dropped, the volume interval contains the
 truth in 39 of 48 scenes instead of 48 of 48, and a frame at 960 x 540 takes 142.9 ms
-instead of 38.8 ms.
+instead of 38.8 ms (3.7×).
 
 What it does now:
 
