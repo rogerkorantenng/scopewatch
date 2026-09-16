@@ -253,6 +253,11 @@ haze. Dark channel 55 to 92 (the gate needs above 132), contrast 32 to 37 (the g
 needs below 22), focus above 400. No real clip here has the diffuse haze the gate is
 built for, so the fog gate is still validated on synthetic haze only.
 
+**Live and local agree.** WSES, Boer and Kavalakat were run on the redeployed service
+(`/version` git_sha `c9f1b97`, OpenCV 5.0.0) with the same parameters as the local run.
+Frames, refusals, blood-covered field peak and median, scale gate, volume status, onset
+and its gate counts, and checkpoint state were identical on all three.
+
 ## A6. What the product outputs now, and why
 
 1. **Blood-covered share of the visible field, per frame, and its rate of change.**
@@ -304,6 +309,7 @@ were used for both.
 | Phase frame accuracy | 0.762 | 0.786 | |
 | Fog 0.1 (not refused), area error if forced | -3.2% | -39.8% | **regression**: haze lowers chroma, and the fog gate's operating point was set for the old segmenter |
 | Cost per frame at 960 x 540 | 38.8 ms | 142.9 ms | **regression**, measured while other jobs shared the machine; the edge profiles, domain cues and chroma decision are all new work per frame |
+| Live service, App Runner 2 vCPU, per frame | 320 x 240: n/a; 640 x 480: about 640 ms (Kaplan S5, 352 s for 549 frames) | 320 x 240: 21 ms (WSES); 384 x 288: 82 ms (Kavalakat); 640 x 480: 244 ms (Boer) | the last two ran as concurrent jobs |
 
 Plainly: the new segmenter is worse on the renderer and better on real tissue, and the
 renderer is not the thing being measured. The small-pool floor (0.4% of the field) was

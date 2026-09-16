@@ -372,7 +372,7 @@ function renderKpis(rec) {
       value = num(r.value, r.unit === '%' ? 1 : (r.value < 10 ? 2 : 1));
       if (r.low != null && r.high != null) note = `${num(r.low, 2)} to ${num(r.high, 2)} ${r.unit}. ${note}`;
       if (r.label === 'Frames measurable') cls = r.value >= 50 ? 'good' : '';
-      if (r.label.startsWith('Blood-covered')) note = `${note}.${realSegmentationLine()}`;
+      if (r.label.startsWith('Blood-covered')) note = `Share of the visible field segmented as blood.${realSegmentationLine()}`;
     }
     return `<div class="kpi ${cls}"><div class="k">${esc(r.label)}</div>
       <div class="v">${esc(value)}${unit}</div><div class="n">${esc(note)}</div></div>`;
@@ -443,7 +443,9 @@ function renderCheckpoint() {
         return `<tr class="seek" data-ms="${c.at_ms}"><td class="mono dim">${esc(clock(c.at_ms))}</td>
           <td>${chip} ${why}</td><td class="dim">${esc(c.decided_by || 'nobody yet')}</td></tr>`;
       }).join('')}</tbody></table>`
-    : `<p style="padding:11px 13px;color:var(--fg-faint)">No checkpoint was raised in this case. The phase never reached the irreversible step without a recorded safety view.</p>`;
+    : `<p style="padding:11px 13px;color:var(--fg-faint)">${state.record?.metrics?.checkpoint?.automatic
+      ? 'No checkpoint was raised in this case. The phase never reached the irreversible step without a recorded safety view.'
+      : 'The automatic checkpoint is off for this run. It is experimental: on real video its image cue, instrument width, cannot tell a clip applier from a grasper nearer the lens.'}</p>`;
   wireSeek($('#cr-body'));
 }
 
