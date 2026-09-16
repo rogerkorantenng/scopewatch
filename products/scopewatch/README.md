@@ -8,19 +8,23 @@ measures what it can honestly measure there.
 
 **Read this before anything else.** Scopewatch was built and evaluated on synthetic
 scenes, where it worked. Then it was run on sixteen real, openly licensed surgical
-clips, and it did not: it read a bleeding field as 0.00 ml, rim shadow as 9.97 ml, and
+clips, and it did not: it read a bleeding field as 0.00 ml, rim shadow as 9.79 ml, and
 held its safety checkpoint on a timer. Every one of those failures has been traced to a
 cause, fixed or gated, and pinned by a test on a real frame. What it outputs has changed
 because of them. The full account is Part A of [docs/evaluation.md](docs/evaluation.md).
 **No real clip has a known blood volume, so no millilitre figure from Scopewatch has
-ever been checked against a real one.**
+ever been checked against a real one.** The fixes also made the synthetic numbers
+worse: pools under 0.4% of the field are dropped, the volume interval contains the
+truth in 39 of 48 scenes instead of 48 of 48, and a frame at 960 x 540 takes 142.9 ms
+instead of 38.8 ms.
 
 What it does now:
 
 1. **Blood-covered field.** Per frame, the share of the visible field segmented as
    blood, and how fast that share changes. On hand-labelled frames from held-out real
-   clips the segmentation's pixel precision is 13% and its recall 11% (the old one: 0%
-   and 0%). It separates blood from shadow and from a port sleeve; it does not reliably
+   clips the segmentation's pixel precision is 13.0% and its recall 10.7% (the old one:
+   0% and 0%). On the dev clips its thresholds were chosen on, it was 61% and 50%. The
+   gap means the colour model does not generalise. It separates blood from shadow and from a port sleeve; it does not reliably
    separate blood from red tissue. That number is shown next to the measurement.
 2. **Volume, usually refused.** Millilitres appear only when the instrument-shaft scale
    is present on enough frames and steady across the case, and are labelled as never
@@ -135,7 +139,7 @@ PYTHONPATH=src ../../.venv/bin/python -m pytest tests/ -q
 ../../.venv/bin/ruff check .
 ```
 
-**TESTCOUNT tests, all passing, and ruff clean.** The suite asserts on numbers, not on
+**140 tests, all passing, and ruff clean** (at commit `06a2f28`). The suite asserts on numbers, not on
 "it ran". `tests/test_real_footage.py` holds the regression tests from real video,
 on small credited crops in `tests/fixtures/real/`: a pooled-blood field that used to
 read as nothing, rim shadow and a port sleeve that used to read as blood, gloved hands

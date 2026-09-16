@@ -12,13 +12,13 @@ licensed real surgical clips from Wikimedia Commons and Zenodo, locally and on t
 service, with identical results. On real video it failed in five ways:
 
 1. **Blood.** A clearly bleeding field (WSES ulcer repair) read 0.00 ml on 555 of 561
-   frames. A nearly bloodless one (Barroso hernia repair) read up to 9.97 ml, all of it
+   frames. A nearly bloodless one (Barroso hernia repair) read up to 9.79 ml, all of it
    shadowed tissue at the rim of the scope's circle. On the Kavalakat omentectomy the
    inside of a port sleeve was called blood.
 2. **Onset** fired on none of the sixteen clips, and on three the reason said a slope of
    17.87, 19.13 or 98.11 ml/min "never reached 0.35 ml/min", which was false.
-3. **The checkpoint** was held 26.4 to 27.8 s into five clips: the 20-second dwell
-   plus start-up, whatever was in the picture.
+3. **The checkpoint** was held on five clips with its critical approach starting 25.8 to
+   27.8 s in: the 20-second dwell plus start-up, whatever was in the picture.
 4. **Scale** was missing on five clips with shafts in plain view, and where present
    implied a field 92 to 205 mm wide.
 5. **Gates**: an open operation was measured as if laparoscopic.
@@ -244,8 +244,8 @@ per lightness at least 1.35 times the scene's median, because under a warm light
 field of bowel can pass the absolute tests. It never uses darkness as evidence. It drops
 a rim of 2% of the frame and anything lit below 35% of the field's median, and fills
 specular highlights back in where they sit on a candidate region. On synthetic scenes it
-scores within a few thousandths of the old winner (Part B of the evaluation). On real
-held-out clips it is better and still poor. The findings below are about the synthetic
+is worse than the old winner (Dice 0.833 against 0.994 with the distractor; Part B of
+the evaluation). On real held-out clips it is better and still poor. The findings below are about the synthetic
 sweep, and they stand as a record of how the original decision was made.
 
 **Otsu is the wrong tool when the target is a minority class.** Otsu assumes two
@@ -492,7 +492,7 @@ that a pool does not is the absence of colour - gauze, a swab, a glove and a len
 are all achromatic, and blood and tissue are not - so the test is now flat **and**
 desaturated, or simply dark enough to be no image at all.
 
-A sixth, `OUT_OF_DOMAIN`, came from real footage: an open cholecystectomy had been
+Another refusal, `OUT_OF_DOMAIN`, came from real footage: an open cholecystectomy had been
 measured as if it were laparoscopic. It fires when drapes or gowns (a cool hue over 45%
 of the field) or large near-white objects such as gloves (over 8% of the field, in a
 field whose remaining saturation is at least 120) are in view, and a clip is refused
@@ -532,7 +532,7 @@ if a US slot frees up.
   sample media and result artefacts.
 - **CloudWatch Logs** for the application and service logs.
 
-**Live at <https://s3vrzphtvv.eu-central-1.awsapprunner.com>.**
+**Live at <https://s3vrzphtvv.eu-central-1.awsapprunner.com>**, `/version` git_sha `06a2f28`. Repository: <https://github.com/rogerkorantenng/scopewatch>.
 
 The endpoint works from a cold start with no local file: the sample clip is inside the
 image and there is a button that runs it.
@@ -568,7 +568,7 @@ product's output, split by clip into dev (thresholds chosen) and test (not). Hea
 | Blood pixel recall | 0.0% | 10.7% |
 | Clips showing a volume | 11 of 16 | 0 of 16 (`CANNOT_MEASURE`) |
 | Onset fired | 0 of 16, reason false on 3 | 0 of 16, reason names the gates |
-| Checkpoint on the dwell timer | 5 of 16 | 0 (and off by default) |
+| Checkpoint held | 6 of 16, five of them on the dwell timer | 0 by default (off, experimental); 3 of 16 if switched on |
 | Open-surgery clip refused | no | yes |
 
 On the dev clips, where the thresholds were chosen, precision and recall are 61% and
@@ -576,8 +576,11 @@ On the dev clips, where the thresholds were chosen, precision and recall are 61%
 
 **Part B, synthetic scenes.** Area, scale, volume-interval coverage, refusal sweeps,
 onset timing, phase confusion and checkpoint timing, on scenes where every quantity is
-set before the pixels exist. Evidence about the arithmetic, none about tissue. Part B
-reports its before-and-after numbers and any regression.
+set before the pixels exist. Evidence about the arithmetic, none about tissue. The
+real-footage changes made these numbers worse, and Part B says so: pools under 0.4% of
+the field are dropped, the volume interval contains the truth in 39 of 48 scenes
+(81%) instead of 48 of 48, and per-frame time at 960 x 540 went from 38.8 ms to
+142.9 ms (measured while other jobs shared the machine).
 
 **What was not measured.** No real clip has a known blood volume, so no volume accuracy
 on real footage exists or is claimed. No clinical dataset with expert labels was used;
@@ -606,10 +609,10 @@ and the README carries that as an open item.
 7. **The running total is a lower bound.** Suctioned and absorbed blood leaves the
    field and is never counted. It is labelled as a lower bound in the interface, the
    record and here.
-8. **Small pools are not measurable.** The false-positive floor is a roughly constant
-   number of pixels, so below a few thousand pixels the error swamps the measurement.
-   The interval widens accordingly and the measurement is flagged unreliable rather
-   than quietly reported.
+8. **Small pools are dropped.** Blood covering under 0.4% of the field is not reported,
+   because on real dev frames components that small were mostly red tissue. On
+   synthetic scenes that drops every 400 px pool, and volume-interval coverage fell
+   from 48 of 48 scenes to 39 of 48.
 9. **Phase inference is validated only on scripted synthetic sequences**, and its
    width cue is fooled on real video by an instrument's distance from the lens. The
    automatic checkpoint that depends on it is off by default.
@@ -665,7 +668,7 @@ AGPL-3.0 section 13 extends copyleft to network use, which a hosted demo endpoin
 triggers, and that risk is not worth taking.
 
 **Where this could do harm, and what stops it.** Real footage showed this happening:
-a bleeding field read as 0.00 ml and a bloodless one as 9.97 ml. The volume is now
+a bleeding field read as 0.00 ml and a bloodless one as 9.79 ml. The volume is now
 withheld unless its scale holds steady, and on real footage it has always been
 withheld. The realistic failure is a clinician trusting a millilitre figure that is wrong - from an unrecovered surface tilt, from a
 film depth outside the assumed range, or from blood the camera never saw. Four things

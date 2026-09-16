@@ -1,5 +1,36 @@
 # Scopewatch evaluation
 
+## The headline, on held-out real clips
+
+| Blood pixels, against hand-drawn masks | Held-out test clips | Dev clips (thresholds chosen here) |
+|---|---|---|
+| Precision | **13.0%** | 60.6% |
+| Recall | **10.7%** | 49.5% |
+
+The gap between those columns means the colour model does not generalise. Rules
+tuned on eight clips found about one blood pixel in nine on eight others, and about
+one in eight of the pixels they called blood were blood.
+
+On the sixteen real clips:
+
+- **No clip shows a millilitre figure.** The scale gate passed on 0 of 16, so every
+  clip reads `CANNOT_MEASURE`.
+- **Onset fired on 0 of 16.** Every time the rate crossed its threshold, the camera was
+  moving or an instrument was entering or leaving (A4).
+- **The automatic checkpoint is off by default and experimental.** Before the fix it
+  was driven by the 20-second dwell timer, not by the picture (A5).
+- **Open surgery is refused** as `OUT_OF_DOMAIN` (A5).
+- **Rim shadow and the port sleeve no longer count as blood**: Barroso's rim crop went
+  from 52% to 0%, the Kavalakat sleeve crop from 11% to 1.4% (A2).
+
+The fixes cost synthetic accuracy (B0): pools under 0.4% of the field are dropped,
+interval coverage fell from 48 of 48 scenes (100%) to 39 of 48 (81%), and per-frame
+time at 960 x 540 went from 38.8 to 142.9 ms, measured while other jobs shared the
+machine.
+
+The live service at `/version` git_sha `06a2f28` (OpenCV 5.0.0, eu-central-1) gave
+results identical to a local run on the WSES, Barroso and TEP 3 clips.
+
 **Read this first.** This document has two halves and they answer different questions.
 
 - **Part A, real footage.** Sixteen openly licensed surgical clips (fifteen
@@ -222,7 +253,7 @@ clips (Boer, Kaplan S5, Barroso) showed something simpler. The old cue compared 
 widths. Those are different statistics, and one ordinary shaft passes that test by
 itself: the cue was already true on **72%, 70% and 89%** of measurable frames before the
 20-second dissection dwell armed it. So the checkpoint was raised on the first frame
-after the dwell, 26.4 to 27.8 s into five clips. On Barroso the "instruments" were pale
+after the dwell, with the critical approach starting 25.8 to 27.8 s into five clips. On Barroso the "instruments" were pale
 peritoneum that passed the steel colour test, and the cue fired on a clip with no clip
 applier in it. Perspective is also real: in Kaplan S1 at 41 s, the only frame behind its
 new checkpoint, the wider shaft is a black grasper closer to the lens, not a clip
@@ -359,9 +390,11 @@ the distractor. Mean over 8 seeds x 7 pool sizes.
 | `lab_ad` a\* and L\* | 0.926 | 0.896 | 0 |
 | **`ratio_dark` redness and flattened darkness** | **0.994** | **0.994** | **0** |
 
-`ratio_dark` is what ships, and the experiment picks it rather than the other way
-round: `evaluate.py` recomputes this table and asserts that the winner matches
-`config.BLOOD_COLOUR_SPACE`.
+`ratio_dark` won this synthetic trial and shipped until real footage was run. It
+scored 0% precision and 0% recall on the held-out real clips, and `chroma_scene`
+(chosen on dev real frames) now ships. `evaluation.json` records the synthetic winner,
+the colour space in use, and that they disagree. On this synthetic table
+`chroma_scene` scores Dice 0.852 clean and 0.833 with the distractor.
 
 Three readings worth taking from that table.
 
