@@ -40,3 +40,8 @@ PYTHONPATH=products/scopewatch/src .venv/bin/python -m uvicorn scopewatch.servic
 ```
 
 Then open the page and press **Run the bundled sample**. No file of your own is needed.
+
+## Licence
+
+Code in this repository is released under the MIT licence (see `LICENSE`). Third-party
+models, datasets and sample media keep their own licences, listed in the product README.
