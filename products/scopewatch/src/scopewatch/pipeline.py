@@ -669,13 +669,21 @@ def _results(result: CaseResult, params: PipelineParams) -> list[dict[str, Any]]
             ),
         }
     )
+    # A cumulative total of 0.00 ml is a number, and on a clip where nothing was
+    # measurable it is a lie told in the right units. The total only counts as
+    # measured when at least one frame produced a volume to add up.
+    measured_any = any(f.blood and f.blood.volume_ml is not None for f in result.frames)
     rows.append(
         {
             "label": "Cumulative observed loss",
-            "value": _r(result.cumulative_observed_ml),
+            "value": _r(result.cumulative_observed_ml) if measured_any else None,
             "unit": "ml",
-            "measured": result.cumulative_observed_ml is not None,
-            "note": "lower bound; suctioned and soaked blood leaves the field uncounted",
+            "measured": measured_any,
+            "note": (
+                "lower bound; suctioned and soaked blood leaves the field uncounted"
+                if measured_any
+                else "no frame in this clip produced a volume to add up"
+            ),
         }
     )
     if result.onset:
@@ -692,13 +700,18 @@ def _results(result: CaseResult, params: PipelineParams) -> list[dict[str, Any]]
                 "note": result.onset.reason,
             }
         )
+    rejected = result.ledger.to_dict()["rejected_by"]
+    worst = max(rejected, key=lambda k: rejected[k]) if rejected else ""
     rows.append(
         {
             "label": "Frames measurable",
             "value": round(result.ledger.usable_fraction * 100.0, 1),
             "unit": "%",
             "measured": result.ledger.total > 0,
-            "note": f"{result.ledger.usable} of {result.ledger.total} frames",
+            "note": (
+                f"{result.ledger.usable} of {result.ledger.total} frames"
+                + (f"; most often refused for {worst}" if worst else "")
+            ),
         }
     )
     checkpoint = result.loop.open_checkpoint
