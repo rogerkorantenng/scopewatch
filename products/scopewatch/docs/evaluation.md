@@ -697,3 +697,55 @@ When that video exists, the three things to re-fit on it are the false-positive 
 and shape sigma in `blood.py`, the four refusal thresholds in `config.py`, and the
 phase rules — in that order, because the first one sets every interval the product
 prints.
+
+## 10. A learned blood model: tried, measured, not shipped
+
+The colour model does not generalise (held-out precision 13.0%, recall 10.7%, IoU 6.2%),
+so we trained a learned segmenter to replace it. It lost on the same held-out frames,
+and the product still ships the colour model. What we tried, and why it failed:
+
+**Data.** CholecSeg8k (8,080 frames, CC BY-NC-SA 4.0), m2caiSeg, and DSAD organ frames
+as negatives. Across all of it, blood is labelled in **exactly two operations**:
+CholecSeg8k video01 (692 frames) and one m2caiSeg source video (23 of its 24 blood
+frames). The other 16 CholecSeg8k videos have no blood pixels.
+
+**Model.** MobileNetV3-Large encoder (timm `ra_in1k`, Apache-2.0) with an FPN-lite
+decoder, trained in PyTorch on a local RTX 5000 Ada, exported to ONNX and run through
+OpenCV 5's `cv2.dnn`. Parity with PyTorch: max probability difference 3.4e-6 over 50
+frames. CPU cost on 2 cores: 20.6 to 27.4 ms per frame, inside the 150 ms budget.
+
+**Selection without the held-out frames.** Leave-one-blood-video-out: each fold trains
+without one blood operation and is scored on it. Also, the false-positive share on
+held-out DSAD patients, with the rule "best mean fold IoU with DSAD FP under 2%".
+
+| Config | Mean fold IoU | DSAD FP | Note |
+|---|---|---|---|
+| Base, threshold 0.3 | 0.297 | 14.6% | fails the FP rule |
+| Base, threshold 0.5 | 0.233 | 5.0% | fails the FP rule |
+| **Base, threshold 0.7** | **0.190** | **0.18%** | selected |
+| More negatives, strong augmentation, hard-negative mining | 0.025 to 0.045 | — | stopped predicting blood |
+| Moderate negatives, strong augmentation, dropout, frozen early encoder, threshold 0.7 | 0.179 | 0.51% | below base |
+| Learned AND colour model (both ensembles, all thresholds) | at most 0.056 | at most 2.2% | the colour model misses the training operations' blood |
+
+**Held-out real frames**, final model trained on both blood operations:
+
+| | Precision | Recall | IoU |
+|---|---|---|---|
+| Colour model (shipped) | 13.0% | 10.7% | 6.2% |
+| Learned, threshold 0.7 (selected) | 5.9% | 22.1% | 4.9% |
+| Learned, threshold 0.3 | 1.8% | 39.8% | 1.7% |
+
+The held-out frames were scored twice: once at the threshold first chosen on validation
+(0.3), and once at the threshold the FP rule later selected (0.7). Neither run changed
+the model.
+
+**Why it failed.** With blood in two operations from one centre, the network learned
+what those two operations look like rather than what blood looks like. It called 16% of
+organ pixels blood on unseen DSAD patients at threshold 0.3, and flagged 26 to 85% of
+frames on robotic and Kaplan clips that contain no visible blood. Pushing negatives
+harder removed the false positives and the true positives with them.
+
+**What would fix it** is blood labelled across many operations and centres. No public
+dataset we could obtain has that. Hand-labelling a few hundred frames from the openly
+licensed clips is the realistic route, and it is the next step if this product is
+pursued. The training code and the unshipped model are kept outside the release.
