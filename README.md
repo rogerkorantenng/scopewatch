@@ -20,7 +20,6 @@ action of any kind.**
 | **Architecture, with the OpenCV 5, agent and AWS diagrams** | [`products/scopewatch/docs/architecture.md`](products/scopewatch/docs/architecture.md) |
 | **Evaluation: method, numbers, plots and failure cases** | [`products/scopewatch/docs/evaluation.md`](products/scopewatch/docs/evaluation.md) |
 | **What it costs to run** | [`products/scopewatch/docs/costs.md`](products/scopewatch/docs/costs.md) |
-| **Submission text** | [`products/scopewatch/docs/devpost.md`](products/scopewatch/docs/devpost.md) |
 
 ## Why the repository has this shape
 

@@ -313,7 +313,7 @@ class PipelineParams:
 
 @dataclass(frozen=True)
 class Palette:
-    """Ligature, from docs/design/atlas.md section 1. BGR, because this is OpenCV."""
+    """Ligature palette, BGR, because this is OpenCV."""
 
     ground: tuple[int, int, int] = (16, 18, 11)
     surface: tuple[int, int, int] = (27, 31, 20)

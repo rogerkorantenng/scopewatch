@@ -13,4 +13,3 @@
 .git
 **/.pytest_cache
 **/node_modules
-**/docs/deck

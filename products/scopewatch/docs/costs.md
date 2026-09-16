@@ -16,7 +16,7 @@ repository and the image were rebuilt there; App Runner pulls from ECR in its ow
 region.
 
 **A caveat on the rates below.** Every price quoted in this document is the published
-**us-east-1** rate, because that is what was verified in `research/FINDINGS.md`. The
+**us-east-1** rate, because that is what was verified. The
 service runs in eu-central-1 and I did not separately verify Frankfurt's rates, which
 for App Runner and ECR are typically the same or within a few per cent. The totals are
 therefore an estimate carrying that much uncertainty, and they are marked as such
@@ -79,9 +79,8 @@ What the vCPU side adds at a few levels of use:
 | 730 hr (saturated, every hour of the month) | $93.44 | $20.44 | **$113.88** |
 
 Source for both rates: the AWS App Runner pricing page, $0.007/GB-hr provisioned
-memory and $0.064/vCPU-hr active compute, us-east-1. The same two figures are
-recorded in `research/FINDINGS.md` §3.2, where they were used to derive the
-~$2.52/month idle cost of a 0.25 vCPU / 0.5 GB service. 730 hours is AWS's own
+memory and $0.064/vCPU-hr active compute, us-east-1. The same two figures give
+the ~$2.52/month idle cost of a 0.25 vCPU / 0.5 GB service. 730 hours is AWS's own
 month (365 x 24 / 12).
 
 App Runner has no free tier. Data transfer out of the public endpoint is billed
@@ -92,8 +91,7 @@ That figure is **unverified** — I did not look up App Runner's egress rate.
 ## ECR storage
 
 $0.10 per GB-month for private repository storage, us-east-1, from the Amazon ECR
-pricing page. This rate is not in `research/FINDINGS.md`; it is the published
-list price. ECR bills the compressed size of the layers it stores.
+pricing page. This is the published list price. ECR bills the compressed size of the layers it stores.
 
 The image has not been built yet, so its size is an **estimate**, not a
 measurement:
@@ -127,8 +125,7 @@ Basic scan-on-push, which `infra/ecr.sh` enables, is free.
 
 ## S3
 
-$0.023 per GB-month, S3 Standard, first 50 TB, us-east-1
-(`research/FINDINGS.md` §3.2).
+$0.023 per GB-month, S3 Standard, first 50 TB, us-east-1.
 
 The `scopewatch/` prefix currently holds one zero-byte object, so the charge is
 **$0.00**. If evidence frames and benchmark output start landing there, 1 GB is

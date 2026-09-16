@@ -238,6 +238,6 @@ products/scopewatch/
   tests/             pytest, real assertions on numbers; fixtures/real has credited crops
   eval/real/         hand-drawn blood labels and visible-bleeding notes for the real clips
   media/             the bundled sample clip and the unmeasurable one
-  docs/              report, architecture, evaluation, costs, devpost, narration, deck
+  docs/              report, architecture, evaluation, costs
   infra/deploy.sh    ECR then App Runner, idempotent
 ```
