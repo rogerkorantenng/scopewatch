@@ -13,7 +13,14 @@ US regions were at that cap with other projects: us-east-1 held `ugjcs-backend` 
 two App Runner services per region at the moment`. eu-central-1 had both slots free
 and no other agent deploying into it, so Scopewatch runs in **Frankfurt**. The ECR
 repository and the image were rebuilt there; App Runner pulls from ECR in its own
-region. Prices below are eu-central-1's, which differ slightly from us-east-1's.
+region.
+
+**A caveat on the rates below.** Every price quoted in this document is the published
+**us-east-1** rate, because that is what was verified in `research/FINDINGS.md`. The
+service runs in eu-central-1 and I did not separately verify Frankfurt's rates, which
+for App Runner and ECR are typically the same or within a few per cent. The totals are
+therefore an estimate carrying that much uncertainty, and they are marked as such
+rather than presented as a bill.
 
 For a US judge this adds roughly 100 ms of round-trip latency and nothing else. If a
 US slot frees up before judging, moving is one `AWS_REGION=us-east-1 ./infra/deploy.sh`
@@ -137,9 +144,16 @@ prefixes are not directories; the first real upload recreates it.
 | Item | $/month |
 |---|---:|
 | App Runner, 2 vCPU / 4 GB, always on, ~30 hr active | 24.28 |
-| ECR storage (estimated 1.5 GB) | 0.15 |
+| ECR storage, eu-central-1, the image the service runs (~1.1 GB) | 0.11 |
+| ECR storage, us-east-1, the first build, now unused | 0.11 |
 | S3 under `scopewatch/` | 0.00 |
-| **Total** | **~$24.43** |
+| **Total** | **~$24.50** |
+
+The us-east-1 repository is a leftover of the region change and is the one line here
+worth deleting: `aws ecr delete-repository --repository-name opencv26/scopewatch
+--region us-east-1 --force` takes eleven cents off and removes nothing the live service
+uses. It is left in place for now because it holds the first image that was built and
+pushed, and eleven cents is cheaper than needing it back.
 
 Against the workspace's $80/month budget, Scopewatch alone takes about 30% of
 it, nearly all of it the always-on memory reservation. Compared with running the
