@@ -51,7 +51,7 @@ h1,h2,h3,p,figure{margin:0}
 .app{display:grid;grid-template-columns:var(--rail) 1fr;min-height:100vh}
 
 /* ───────────────────────── rail ───────────────────────── */
-.rail{background:#080E0C;border-right:1px solid var(--border);display:flex;
+.rail{background:var(--bg-raised);border-right:1px solid var(--border);display:flex;
   flex-direction:column;padding:16px 14px 14px;position:sticky;top:0;height:100vh;overflow:auto}
 .brand{display:flex;align-items:center;gap:9px;padding:2px 4px 16px}
 .brand b{font-size:18px;font-weight:700;letter-spacing:-.015em;display:block}
@@ -252,7 +252,7 @@ html{scroll-behavior:smooth}
 .crit:last-child{border-bottom:0}
 .crit .n{width:20px;height:20px;border-radius:50%;flex:none;display:grid;place-items:center;
   font-size:14px;font-weight:700;margin-top:1px}
-.crit.done .n{background:var(--ok);color:#06231A}
+.crit.done .n{background:var(--ok);color:#FFFFFF}
 .crit.todo .n{background:transparent;border:1.5px solid var(--danger);color:var(--danger)}
 .crit.wait .n{background:transparent;border:1.5px solid var(--fg-faint);color:var(--fg-faint)}
 .crit .t{font-size:14px;line-height:1.4}

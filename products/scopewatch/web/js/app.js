@@ -92,8 +92,6 @@ async function boot() {
 
   const cost = $('#railfoot').dataset.cost || '';
   const [inst, rate] = cost.split('—').map((s) => s.trim());
-  if (inst) $('#st-inst').textContent = inst;
-  if (rate) $('#st-cost').textContent = rate;
 
   $('#run-sample').addEventListener('click', runSample);
   $('#file-input').addEventListener('change', (e) => {
@@ -211,6 +209,11 @@ function busy(on) {
   b.lastChild.textContent = on ? ' Analysing the case…' : ' Run the bundled sample';
 }
 function progress(pct, message) {
+  // Once a case is running, stop telling the user to run one.
+  const empty = document.querySelector('.kpi-empty');
+  if (empty) empty.parentElement.innerHTML =
+    `<div class="kpi kpi-empty"><div class="v">Measuring the field\u2026</div>
+      <div class="n">Blood coverage, volume, bleeding onset and the safety checkpoint appear here.</div></div>`;
   $('#prog-fill').style.width = `${Math.max(0, Math.min(100, pct))}%`;
   $('#prog-pct').textContent = `${Math.round(pct)}%`;
   if (message) $('#prog-msg').textContent = sentence(message);
@@ -240,9 +243,7 @@ function renderEmpty() {
         <div class="n">Blood coverage, volume, bleeding onset and the safety checkpoint appear here.</div></div>`;
   $('#cr-body').innerHTML = `<p style="padding:11px 13px;color:var(--fg-faint)">No checkpoint has been raised. The automatic checkpoint is experimental and off by default: on real video its cue, instrument width, cannot tell a clip applier from a grasper nearer the lens.</p>`;
   $('#ev-body').innerHTML = `<tr><td colspan="3" class="faint">The log fills with the agent's own transitions once a case has run.</td></tr>`;
-  $('#in-body').innerHTML = `<div class="cell"><h3>Cost of a run</h3>
-    <div class="kv"><span>Instance</span><span>${esc($('#st-inst').textContent)}</span></div>
-    <div class="kv"><span>Rate</span><span>${esc($('#st-cost').textContent)}</span></div></div>`;
+  $('#in-body').innerHTML = `<div class="cell"><h3>Cost of a run</h3></div>`;
   drawTrace();
 }
 
@@ -674,7 +675,7 @@ function renderInstruments(rec) {
   const q = rec.metrics?.quality || {};
   const stages = rec.timings?.stages || [];
   const totalMs = rec.timings?.total_ms || 0;
-  const rate = parseFloat(($('#st-cost').textContent || '').replace(/[^0-9.]/g, '')) || 0;
+  const rate = 0.144;  // App Runner 2 vCPU / 4 GB, $/hr
   const runCost = (totalMs / 3600000) * rate;
   const counts = (rec.evidence || []).map((e) => e.metrics?.instruments?.count).filter((n) => n != null);
   const maxCount = counts.length ? Math.max(...counts) : 0;
@@ -706,8 +707,6 @@ function renderInstruments(rec) {
       <div class="kv"><span>Total</span><span>${ms(totalMs)}</span></div>
     </div>
     <div class="cell"><h3>What the run cost</h3>
-      <div class="kv"><span>Instance</span><span>${esc($('#st-inst').textContent)}</span></div>
-      <div class="kv"><span>Rate</span><span>${esc($('#st-cost').textContent)}</span></div>
       <div class="kv"><span>This analysis</span><span>${runCost < 0.01 ? `${(runCost * 100).toFixed(3)} cents` : `$${runCost.toFixed(4)}`}</span></div>
       <div class="kv"><span>Blood film depth assumed</span><span>${(rec.metrics?.blood?.film_depth_mm || [1, 2, 3]).join(' to ')} mm</span></div>
     </div>`;
@@ -717,12 +716,7 @@ function renderRail(rec) {
   const q = rec.metrics?.quality || {};
   const stages = rec.timings?.stages || [];
   const slow = stages.slice().sort((a, b) => b.ms - a.ms)[0];
-  $('#st-frames').textContent = `${q.usable ?? 0} of ${q.frames ?? 0} measurable`;
   const pct = Math.round((q.usable_fraction || 0) * 100);
-  $('#st-meter').className = `meter ${pct < 50 ? 'warn' : ''}`;
-  $('#st-meter').firstElementChild.style.width = `${pct}%`;
-  $('#st-stage').textContent = slow ? `${slow.name} ${num(slow.ms_per_call, 1)} ms/call` : 'none';
-  $('#st-total').textContent = ms(rec.timings?.total_ms || 0);
   $('#st-opencv').textContent = rec.env?.opencv_version || $('#st-opencv').textContent;
 
   const counts = (rec.evidence || []).map((e) => e.metrics?.instruments?.count).filter((n) => n != null);
