@@ -242,7 +242,7 @@ function renderEmpty() {
       `<div class="kpi kpi-empty"><div class="v">Run a case to measure the field.</div>
         <div class="n">Blood coverage, volume, bleeding onset and the safety checkpoint appear here.</div></div>`;
   $('#cr-body').innerHTML = `<p style="padding:11px 13px;color:var(--fg-faint)">No checkpoint has been raised. The automatic checkpoint is experimental and off by default: on real video its cue, instrument width, cannot tell a clip applier from a grasper nearer the lens.</p>`;
-  $('#ev-body').innerHTML = `<tr><td colspan="3" class="faint">The log fills with the agent's own transitions once a case has run.</td></tr>`;
+  { const p = document.getElementById('events'); if (p) p.hidden = true; }
   $('#in-body').innerHTML = `<div class="cell"><h3>Cost of a run</h3></div>`;
   drawTrace();
 }
@@ -395,7 +395,7 @@ function renderCheckpoint() {
 
   if (open) {
     $('#cp-hold').innerHTML =
-      `<svg width="18" height="18" viewBox="0 0 18 18" fill="none" aria-hidden="true"><path d="M9 1.6l7.4 13H1.6z" stroke="#0B1210" stroke-width="1.8" stroke-linejoin="round"/><path d="M9 6.6v3.4" stroke="#0B1210" stroke-width="1.9" stroke-linecap="round"/><circle cx="9" cy="12.2" r="1" fill="#0B1210"/></svg>
+      `<svg width="18" height="18" viewBox="0 0 18 18" fill="none" aria-hidden="true"><path d="M9 1.6l7.4 13H1.6z" stroke="#FFFFFF" stroke-width="1.8" stroke-linejoin="round"/><path d="M9 6.6v3.4" stroke="#FFFFFF" stroke-width="1.9" stroke-linecap="round"/><circle cx="9" cy="12.2" r="1" fill="#FFFFFF"/></svg>
        Held at ${esc(clock(open.at_ms))} — frame ${open.frame_index} pinned as evidence
        <span style="margin-left:auto">Phase ${esc(PHASE_NAMES[open.phase] || open.phase)}</span>`;
     $('#cp-question').textContent = open.question;
@@ -552,13 +552,16 @@ function buildEvents(rec) {
 
 function renderEvents() {
   const rows = state.events;
+  const panel = document.getElementById('events');
+  if (panel) panel.hidden = rows.length === 0;
+  if (!rows.length) return;
   $('#ev-sub').textContent = `${rows.length} event${rows.length === 1 ? '' : 's'}`;
   $('#ev-body').innerHTML = rows.length
     ? rows.map((e) => `<tr class="seek" data-ms="${e.ms}" tabindex="0">
         <td class="mono dim">${esc(clock(e.ms))}</td>
         <td>${esc(e.text)}</td>
         <td class="num ${e.cls === 'dim' ? 'dim' : esc(e.cls)}">${esc(e.value)}</td></tr>`).join('')
-    : `<tr><td colspan="3" class="faint">No agent action on this case. The loop acts when an onset survives its gates, when the lens fogs, or when the experimental checkpoint is on; none of those happened here.</td></tr>`;
+    : '';
   wireSeek($('#ev-body'));
 }
 
@@ -715,10 +718,17 @@ function renderRail(rec) {
   const counts = (rec.evidence || []).map((e) => e.metrics?.instruments?.count).filter((n) => n != null);
   $('#ct-live').textContent = q.usable ?? 0;
   $('#ct-trace').textContent = rec.metrics?.series?.times_ms?.length || 0;
-  $('#ct-events').textContent = state.events.length;
-  $('#ct-checkpoints').textContent = (state.agent?.checkpoints || []).length;
-  $('#ct-instruments').textContent = counts.length ? Math.max(...counts) : 0;
-  $('#ct-evidence').textContent = (rec.evidence || []).length;
+  // A section with nothing in it is not a section. Hide the nav row with the panel.
+  const navCount = (id, n) => {
+    const el = $(`#ct-${id}`);
+    if (el) el.textContent = n;
+    const link = document.querySelector(`.nav a[data-nav="${id}"]`);
+    if (link) link.hidden = n === 0;
+  };
+  navCount('events', state.events.length);
+  navCount('checkpoints', (state.agent?.checkpoints || []).length);
+  navCount('instruments', counts.length ? Math.max(...counts) : 0);
+  navCount('evidence', (rec.evidence || []).length);
 }
 
 function renderPhases(rec) {
@@ -748,8 +758,8 @@ function drawTrace() {
   const H = 96, L = tight ? 48 : 58, R = 14, TOP = 8, BOT = 18;
   if (!s || !s.times_ms?.length) {
     host.innerHTML = `<svg viewBox="0 0 ${W} ${H}" width="${W}" height="${H}" role="img" aria-label="The field trace is empty until a case has been analysed.">
-      <rect width="${W}" height="${H}" fill="#141F1B"/>
-      <text x="${L}" y="52" font-family="Archivo" font-size="14" fill="#7F968F">The field trace draws here across the whole case, once one has run.</text></svg>`;
+      <rect width="${W}" height="${H}" fill="#FFFFFF"/>
+      <text x="${L}" y="52" font-family="Archivo" font-size="14" fill="#6E767F">The field trace draws here across the whole case, once one has run.</text></svg>`;
     state.geom = null;
     return;
   }
@@ -766,7 +776,7 @@ function drawTrace() {
   state.geom = { x0, x1, t0, t1, W };
 
   const parts = [];
-  parts.push(`<rect width="${W}" height="${H}" fill="#141F1B"/>`);
+  parts.push(`<rect width="${W}" height="${H}" fill="#FFFFFF"/>`);
 
   // ruled paper
   const ticks = [0, 0.5, 1];
@@ -774,9 +784,9 @@ function drawTrace() {
   const nx = tight ? 3 : 6;
   const verticals = Array.from({ length: nx + 1 }, (_, i) =>
     `M${(x0 + ((x1 - x0) * i) / nx).toFixed(1)} ${yT}V${yB}`).join('');
-  parts.push(`<g stroke="#24352F" stroke-width="1" fill="none"><path d="${rules}"/><path d="${verticals}"/></g>`);
+  parts.push(`<g stroke="#E3E6EA" stroke-width="1" fill="none"><path d="${rules}"/><path d="${verticals}"/></g>`);
   if (!flat) {
-    parts.push(`<g font-family="Archivo" font-size="14" fill="#7F968F">${
+    parts.push(`<g font-family="Archivo" font-size="14" fill="#6E767F">${
       ticks.map((f) => `<text x="4" y="${(Y(vmax * f) + 4.5).toFixed(1)}">${num(vmax * f, 1)}%</text>`).join('')}</g>`);
   }
 
@@ -787,11 +797,11 @@ function drawTrace() {
     let j = i;
     while (j + 1 < s.measurable.length && !s.measurable[j + 1]) j += 1;
     const gx0 = X(s.times_ms[i]), gx1 = Math.max(X(s.times_ms[j]), X(s.times_ms[i]) + 2);
-    parts.push(`<rect x="${gx0.toFixed(1)}" y="${yT}" width="${(gx1 - gx0).toFixed(1)}" height="${yB - yT}" fill="#E8C25A" opacity=".10"/>`);
-    parts.push(`<path d="M${gx0.toFixed(1)} ${yT}V${yB}M${gx1.toFixed(1)} ${yT}V${yB}" stroke="#E8C25A" stroke-width="1" opacity=".5"/>`);
+    parts.push(`<rect x="${gx0.toFixed(1)}" y="${yT}" width="${(gx1 - gx0).toFixed(1)}" height="${yB - yT}" fill="#8A5600" opacity=".10"/>`);
+    parts.push(`<path d="M${gx0.toFixed(1)} ${yT}V${yB}M${gx1.toFixed(1)} ${yT}V${yB}" stroke="#8A5600" stroke-width="1" opacity=".5"/>`);
     if (gx1 - gx0 > 74) {
-      parts.push(`<rect x="${(gx0 + 3).toFixed(1)}" y="${yB - 21}" width="68" height="18" rx="2" fill="#E8C25A"/>`);
-      parts.push(`<text x="${(gx0 + 8).toFixed(1)}" y="${yB - 7}" font-family="Archivo" font-size="14" font-weight="700" fill="#0B1210">no data</text>`);
+      parts.push(`<rect x="${(gx0 + 3).toFixed(1)}" y="${yB - 21}" width="68" height="18" rx="2" fill="#8A5600"/>`);
+      parts.push(`<text x="${(gx0 + 8).toFixed(1)}" y="${yB - 7}" font-family="Archivo" font-size="14" font-weight="700" fill="#FFFFFF">no data</text>`);
     }
     i = j + 1;
   }
@@ -809,10 +819,10 @@ function drawTrace() {
     const first = g[0].split(' ')[0], last = g[g.length - 1].split(' ')[0];
     return `M${first} ${yB}L${g.join('L')}L${last} ${yB}Z`;
   }).join(' ');
-  if (area) parts.push(`<path d="${area}" fill="#FF8A3D" opacity=".12"/>`);
+  if (area) parts.push(`<path d="${area}" fill="#0A6E62" opacity=".12"/>`);
   if (d) {
     const len = Math.round((x1 - x0) * 1.6);
-    parts.push(`<path class="line" style="--len:${len}" d="${d}" fill="none" stroke="#FF8A3D" stroke-width="2.2" stroke-linejoin="round" stroke-linecap="round"/>`);
+    parts.push(`<path class="line" style="--len:${len}" d="${d}" fill="none" stroke="#0A6E62" stroke-width="2.2" stroke-linejoin="round" stroke-linecap="round"/>`);
   }
 
   // the onset: a vertical amber rule, its uncertainty, and a time label
@@ -820,27 +830,27 @@ function drawTrace() {
   if (onset?.detected && onset.timestamp_ms != null) {
     const ox = X(onset.timestamp_ms);
     const u = (onset.uncertainty_ms || 0) / span * (x1 - x0);
-    if (u > 1) parts.push(`<rect x="${(ox - u).toFixed(1)}" y="${yT}" width="${(u * 2).toFixed(1)}" height="${yB - yT}" fill="#FF8A3D" opacity=".07"/>`);
-    parts.push(`<path d="M${ox.toFixed(1)} ${yT}V${yB}" stroke="#FF8A3D" stroke-width="1.6" stroke-dasharray="4 3"/>`);
+    if (u > 1) parts.push(`<rect x="${(ox - u).toFixed(1)}" y="${yT}" width="${(u * 2).toFixed(1)}" height="${yB - yT}" fill="#0A6E62" opacity=".07"/>`);
+    parts.push(`<path d="M${ox.toFixed(1)} ${yT}V${yB}" stroke="#0A6E62" stroke-width="1.6" stroke-dasharray="4 3"/>`);
     const idx = s.times_ms.findIndex((t) => t >= onset.timestamp_ms);
-    if (idx >= 0) parts.push(`<circle cx="${ox.toFixed(1)}" cy="${Y(s.smoothed[idx]).toFixed(1)}" r="4" fill="#FF8A3D"/>`);
+    if (idx >= 0) parts.push(`<circle cx="${ox.toFixed(1)}" cy="${Y(s.smoothed[idx]).toFixed(1)}" r="4" fill="#0A6E62"/>`);
     const label = `onset ${clock(onset.timestamp_ms)} ± ${num(onset.uncertainty_ms / 1000, 0)} s`;
     const w = 20 + label.length * 7.6;
     const lx = Math.max(x0 + 2, ox + w + 8 > x1 ? ox - w - 6 : ox + 6);
     // The caption owns the top-left corner, so a label that would land on it
     // drops to the second row rather than printing through it.
     const ly = lx < x0 + 158 ? yT + 21 : yT;
-    parts.push(`<rect x="${lx.toFixed(1)}" y="${ly}" width="${w.toFixed(1)}" height="19" rx="2" fill="#FF8A3D"/>`);
-    parts.push(`<text x="${(lx + 8).toFixed(1)}" y="${ly + 14}" font-family="Archivo" font-size="14" font-weight="700" fill="#0B1210">${esc(label)}</text>`);
+    parts.push(`<rect x="${lx.toFixed(1)}" y="${ly}" width="${w.toFixed(1)}" height="19" rx="2" fill="#0A6E62"/>`);
+    parts.push(`<text x="${(lx + 8).toFixed(1)}" y="${ly + 14}" font-family="Archivo" font-size="14" font-weight="700" fill="#FFFFFF">${esc(label)}</text>`);
   }
 
-  parts.push(`<text x="${x0 + 6}" y="${yT + 14}" font-family="Archivo" font-size="14" fill="#9DB3AC">Blood-covered field, % of view</text>`);
+  parts.push(`<text x="${x0 + 6}" y="${yT + 14}" font-family="Archivo" font-size="14" fill="#596069">Blood-covered field, % of view</text>`);
   if (flat) {
     parts.push(`<text x="${((x0 + x1) / 2).toFixed(1)}" y="${((yT + yB) / 2 + 5).toFixed(1)}" text-anchor="middle"
-      font-family="Archivo" font-size="14" font-weight="600" fill="#E8C25A">No frame in this clip could be measured, so the trace carries no line</text>`);
+      font-family="Archivo" font-size="14" font-weight="600" fill="#8A5600">No frame in this clip could be measured, so the trace carries no line</text>`);
   }
   const labels = Array.from({ length: nx + 1 }, (_, k) => t0 + (span * k) / nx);
-  parts.push(`<g font-family="Archivo" font-size="14" fill="#7F968F">${
+  parts.push(`<g font-family="Archivo" font-size="14" fill="#6E767F">${
     labels.map((t, k) => {
       const x = X(t);
       const anchor = k === 0 ? 'start' : k === nx ? 'end' : 'middle';
