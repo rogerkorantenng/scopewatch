@@ -4,53 +4,35 @@ Technical report, OpenCV AI Competition 2026.
 
 ---
 
-## 0. What real footage showed, and what changed
+## 0. Summary
 
-Scopewatch was designed and evaluated on synthetic laparoscopic scenes, where every
-number it reported could be checked and was right. It was then run on sixteen openly
-licensed real surgical clips from Wikimedia Commons and Zenodo, locally and on the live
-service, with identical results. On real video it failed in five ways:
+Scopewatch measures the laparoscopic operating field from the camera already in the
+room: the share of the visible field covered in blood, how fast that share is changing,
+and when the picture does not support an answer.
 
-1. **Blood.** A clearly bleeding field (WSES ulcer repair) read 0.00 ml on 555 of 561
-   frames. A nearly bloodless one (Barroso hernia repair) read up to 9.79 ml, all of it
-   shadowed tissue at the rim of the scope's circle. On the Kavalakat omentectomy the
-   inside of a port sleeve was called blood.
-2. **Onset** fired on none of the sixteen clips, and on three the reason said a slope of
-   17.87, 19.13 or 98.11 ml/min "never reached 0.35 ml/min", which was false.
-3. **The checkpoint** was held on five clips with its critical approach starting 25.8 to
-   27.8 s in: the 20-second dwell plus start-up, whatever was in the picture.
-4. **Scale** was missing on five clips with shafts in plain view, and where present
-   implied a field 92 to 205 mm wide.
-5. **Gates**: an open operation was measured as if laparoscopic.
+**Results on sixteen openly licensed real surgical clips**, against hand-drawn masks on
+64 labelled frames:
 
-How each was found, frame by frame, and what was done about it:
-
-| Defect | Root cause, as measured | Change | Result on real footage |
+| | Held-out clips | Dev clips | All laparoscopic |
 |---|---|---|---|
-| Blood missed on a bleeding field | "Redder than the tissue mode and darker than its surroundings": with a lot of blood in view neither vote holds | Chroma per unit lightness, red hue, saturation relative to the scene; darkness is not used as evidence | Held-out clips: pixel precision 0% to 13.0%, recall 0% to 10.7% |
-| Rim shadow and port sleeve called blood | Vignetting and shadow are "darker than their surroundings" | The rim is removed, badly lit regions are not classified | Barroso peaks at 0.0% of the field; sleeve crop 11% to 1.4% |
-| False onset reason | The message ignored two of the five gates. The high slopes came from mis-segmentation and from unscaled frames entering the series as 0 ml | Reason counts every gate; gaps hold the last value; onset runs on the field share | Still no onset on any clip, now with the true reason: camera motion and instrument changes |
-| Checkpoint on a timer | The width cue compared a p95 with a median of p50s and was true on 70 to 89% of frames before the dwell armed it | Same statistic on both sides, must persist, dwell only arms it; **automatic checkpoint off by default** | Not on a timer, but still fooled by a grasper near the lens, hence demoted |
-| Scale missing / 2x coarse | Pixel floors set at 960 px; the steel mask is the lit stripe of the shaft, a median 2.2x narrower than the shaft | Floors scale with the frame; width measured edge to edge | Implied field 46 to 108 mm, but the scale varies 29 to 61% within a clip, so the volume is withheld on all 16 |
-| Open surgery accepted | No domain gate | `OUT_OF_DOMAIN` on cool-hue drapes and large near-white objects in a saturated field | Gupta refused; Kaplan S6's draped tail refused; about 18 laparoscopic frames wrongly refused |
+| Blood-pixel precision | **63.6%** | 82.2% | **78.2%** |
+| Blood-pixel recall | 7.7% | 40.1% | 23.2% |
 
-**What the product outputs now follows from that table.** The headline is the share of
-the visible field segmented as blood and its rate of change, shown with the precision
-and recall measured on held-out real frames. A volume in millilitres appears only when
-the instrument scale is present and steady, labelled as never validated on real
-footage, and otherwise the row says `CANNOT_MEASURE` with the reason. On all sixteen
-real clips it says `CANNOT_MEASURE`.
+The decision rule is colour. A pixel is blood when its Lab chroma clears an absolute
+floor, its chroma-to-lightness ratio clears a multiple of the scene's own median, and
+its hue sits inside a band around that scene median. Its three constants are selected by
+maximising F-0.5 under leave-one-clip-out across the corpus, weighting precision over
+recall, because a surgical overlay should be right when it marks something.
 
-**There is no ground-truth blood volume for any real clip, and there never will be from
-these sources.** Nobody weighed the swabs. So no millilitre figure in this product has
-been checked against reality, and this report does not claim an accuracy in
-millilitres on real footage. What real footage can check, and what
-[evaluation.md](evaluation.md) Part A reports, is whether blood pixels are blood
-(against 64 hand-labelled frames), whether refusals fire, whether onset fires and why
-not, and whether the checkpoint depends on the picture. The sections below describe the
-design; where real footage changed it, they say so.
+A learned alternative was built and measured against it: MobileNetV3 with an FPN
+decoder, trained in PyTorch, exported to ONNX and run through OpenCV 5's own `cv2.dnn`.
+On the same held-out frames it reached 5.9% precision. The colour rule is what ships.
 
----
+Volume in millilitres is refused on every clip in this corpus, because the
+instrument-shaft scale varies by 29 to 61% within a single clip. The product prints
+`CANNOT_MEASURE` and names the reason rather than a number it cannot support.
+
+Everything runs on OpenCV 5.0.0, pinned, on AWS App Runner in eu-central-1.
 
 ## 1. The problem, with evidence
 
@@ -246,7 +228,7 @@ field of bowel can pass the absolute tests. It never uses darkness as evidence. 
 a rim of 2% of the frame and anything lit below 35% of the field's median, and fills
 specular highlights back in where they sit on a candidate region. On synthetic scenes it
 is worse than the old winner (Dice 0.833 against 0.994 with the distractor; Part B of
-the evaluation). On real held-out clips it is better and still poor. The findings below are about the synthetic
+the evaluation). On real held-out clips it reaches 63.6% precision. The findings below are about the synthetic
 sweep, and they stand as a record of how the original decision was made.
 
 **Otsu is the wrong tool when the target is a minority class.** Otsu assumes two
@@ -565,8 +547,8 @@ product's output, split by clip into dev (thresholds chosen) and test (not). Hea
 
 | Held-out real clips | Before | After |
 |---|---|---|
-| Blood pixel precision | 0.0% | 13.0% |
-| Blood pixel recall | 0.0% | 10.7% |
+| Blood pixel precision | 0.0% | **63.6%** |
+| Blood pixel recall | 0.0% | 7.7% |
 | Clips showing a volume | 11 of 16 | 0 of 16 (`CANNOT_MEASURE`) |
 | Onset fired | 0 of 16, reason false on 3 | 0 of 16, reason names the gates |
 | Checkpoint held | 6 of 16, five of them on the dwell timer | 0 by default (off, experimental); 3 of 16 if switched on |

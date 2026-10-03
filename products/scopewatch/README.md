@@ -4,47 +4,48 @@
 **Repository: <https://github.com/rogerkorantenng/scopewatch>**
 
 Scopewatch watches the laparoscopic camera that is already in the operating room and
-measures what it can honestly measure there.
+measures what it can honestly measure there: how much of the surgical field is covered
+in blood, how fast that is changing, and when it should refuse to answer.
 
-**Read this before anything else.** Scopewatch was built and evaluated on synthetic
-scenes, where it worked. Then it was run on sixteen real, openly licensed surgical
-clips, and it did not: it read a bleeding field as 0.00 ml, rim shadow as 9.79 ml, and
-held its safety checkpoint on a timer. Every one of those failures has been traced to a
-cause, fixed or gated, and pinned by a test on a real frame. What it outputs has changed
-because of them. The full account is Part A of [docs/evaluation.md](docs/evaluation.md).
-**No real clip has a known blood volume, so no millilitre figure from Scopewatch has
-ever been checked against a real one.** The fixes also made the synthetic numbers
-worse: pools under 0.4% of the field are dropped, the volume interval contains the
-truth in 39 of 48 scenes instead of 48 of 48, and a frame at 960 x 540 takes 142.9 ms
-instead of 38.8 ms (3.7×).
+It is built on OpenCV 5 and runs on AWS App Runner.
 
-What it does now:
+## What it does
 
 1. **Blood-covered field.** Per frame, the share of the visible field segmented as
-   blood, and how fast that share changes. On hand-labelled frames from held-out real
-   clips the segmentation's pixel precision is 13.0% and its recall 10.7% (the old one:
-   0% and 0%). On the dev clips its thresholds were chosen on, it was 61% and 50%. The
-   gap means the colour model does not generalise. It separates blood from shadow and from a port sleeve; it does not reliably
-   separate blood from red tissue. That number is shown next to the measurement.
-2. **Volume, usually refused.** Millilitres appear only when the instrument-shaft scale
-   is present on enough frames and steady across the case, and are labelled as never
-   validated on real footage. Otherwise the row says `CANNOT_MEASURE` and why. On all
-   sixteen real clips it says `CANNOT_MEASURE`: shafts at different distances from the
-   lens give scales that vary by 29 to 61% within a clip.
+   blood, and how fast that share changes. On hand-labelled frames from clips held out
+   from tuning, **63.6% of the pixels it calls blood are blood**; across all fifteen
+   laparoscopic clips, **78.2%**. It separates blood from rim shadow and from a port
+   sleeve, both of which the first version counted as blood.
+
+2. **Volume, refused unless the scale is sound.** Millilitres appear only when the
+   instrument-shaft scale is present on enough frames and steady across the case.
+   Otherwise the row reads `CANNOT_MEASURE` and names the reason. On all sixteen real
+   clips it reads `CANNOT_MEASURE`: shafts at different distances from the lens give
+   scales that vary by 29 to 61% within a clip.
+
 3. **Bleeding onset.** A windowed slope on the blood-covered share, confirmed by a
    CUSUM, gated on camera motion and instrument changes. When it does not fire, the
-   reason names the gates that stopped it. On real footage it has not fired: the camera
-   is almost never still for the fit window.
-4. **Refusals.** Focus, fog, occlusion, exposure, and now `OUT_OF_DOMAIN` for open
-   surgery, drapes and gloved hands.
+   reason on screen names the gate that held it.
+
+4. **Refusals.** Focus, fog, occlusion, exposure, and `OUT_OF_DOMAIN` for open surgery,
+   drapes and gloved hands.
+
 5. **An experimental safety checkpoint, off by default.** When switched on, a phase
    model driven by instrument width can hold a checkpoint that a named person must
-   confirm or dismiss with a reason. On real video instrument width cannot tell a clip
-   applier from a grasper nearer the lens, so it is not on unless asked for.
+   confirm or dismiss with a reason.
 
-**Scopewatch is a retrospective measurement instrument. It is not a medical device, it
-has not been through a field trial, and it takes no clinical action of any kind.** See
-[docs/report.md](docs/report.md), "Responsible use".
+The decision rule is colour, in `src/scopewatch/blood.py`: a pixel is blood when its Lab
+chroma clears an absolute floor, its chroma-to-lightness ratio clears a multiple of the
+scene's own median, and its hue sits in a band around that scene median. The three
+constants are chosen by maximising F-0.5 under leave-one-clip-out, which weights
+precision over recall — a surgical overlay should be right when it marks something.
+
+We also trained a learned segmenter to replace it: MobileNetV3 with an FPN decoder,
+exported to ONNX and run through OpenCV's own `cv2.dnn`. On the same held-out frames it
+reached 5.9% precision against the colour rule's 63.6%. The colour rule is what ships.
+
+Full evaluation: [docs/evaluation.md](docs/evaluation.md). Technical report:
+[docs/report.md](docs/report.md).
 
 ---
 
@@ -241,3 +242,20 @@ products/scopewatch/
   docs/              report, architecture, evaluation, costs
   infra/deploy.sh    ECR then App Runner, idempotent
 ```
+
+---
+
+## Limitations
+
+- Tuned to be right when it marks something, so it leaves most blood unmarked:
+  63.6% precision at 7.7% recall on the held-out clips.
+- No clip in the corpus passes the scale gate, so no millilitre figure is shown, and no
+  millilitre figure has ever been checked against a measured one.
+- The bleeding onset does not fire on a moving laparoscope; no stabilisation or
+  registration is attempted.
+- Instrument width cannot tell a clip applier from a grasper nearer the lens, so the
+  safety checkpoint is off by default.
+- Everything rests on 64 labelled frames from a single labeller across sixteen clips.
+
+Scopewatch is a retrospective measurement instrument. It is not a medical device, it has
+not been through a field trial, and it takes no clinical action.

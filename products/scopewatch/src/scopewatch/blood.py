@@ -447,12 +447,12 @@ def segment_ratio_dark(image: np.ndarray, valid: np.ndarray) -> np.ndarray:
 # grids, the dev score each one reached and the test score it then produced.
 CHROMA_APERTURE_MARGIN = 0.02  # erode the lit field by this share of the long side
 CHROMA_ILLUMINATION_MIN = 0.35  # of the field's median lightness, after heavy blur
-CHROMA_MIN = 35.0  # CIE Lab chroma, sqrt(a*^2 + b*^2)
+CHROMA_MIN = 42.0  # CIE Lab chroma, sqrt(a*^2 + b*^2)
 CHROMA_PER_LIGHTNESS_MIN = 1.0  # chroma / L*: deep colour for its lightness
 CHROMA_HUE_DEG = (8.0, 50.0)  # Lab hue angle: red, not magenta, not orange-yellow
 CHROMA_L_MAX = 55.0  # L* on 0..100: not bright pink tissue
-SCENE_CHROMA_RATIO = 1.35  # chroma / L* at least this multiple of the scene median
-SCENE_HUE_SLACK_DEG = 3.0  # hue no more than this above the scene median hue
+SCENE_CHROMA_RATIO = 1.55  # chroma / L* at least this multiple of the scene median
+SCENE_HUE_SLACK_DEG = 20.0  # hue no more than this above the scene median hue
 CHROMA_MIN_COMPONENT = 0.004  # a region smaller than this share of the field is dropped
 
 

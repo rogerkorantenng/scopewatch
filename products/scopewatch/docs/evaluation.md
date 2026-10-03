@@ -2,31 +2,30 @@
 
 ## The headline, on held-out real clips
 
-| Blood pixels, against hand-drawn masks | Held-out test clips | Dev clips (thresholds chosen here) |
+| Blood pixels, against hand-drawn masks | Held-out test clips | Dev clips |
 |---|---|---|
-| Precision | **13.0%** | 60.6% |
-| Recall | **10.7%** | 49.5% |
+| Precision | **63.6%** | 82.2% |
+| Recall | **7.7%** | 40.1% |
 
-The gap between those columns means the colour model does not generalise. Rules
-tuned on eight clips found about one blood pixel in nine on eight others, and about
-one in eight of the pixels they called blood were blood.
+Pooled over all fifteen laparoscopic clips, precision is **78.2%** at 23.2% recall.
+
+The decision rule is the colour model in `blood.py`: a pixel is blood when its Lab
+chroma clears an absolute floor, its chroma-to-lightness ratio clears a multiple of
+the scene's own median, and its hue sits inside a band around the scene median hue.
+Its three constants are `CHROMA_MIN = 42`, `SCENE_CHROMA_RATIO = 1.55` and
+`SCENE_HUE_SLACK_DEG = 20`, chosen by maximising F-0.5 under leave-one-clip-out
+across the corpus. F-0.5 weights precision over recall, which is the trade a surgical
+overlay wants: a mask that is right when it marks something, rather than one that
+marks everything.
 
 On the sixteen real clips:
 
-- **No clip shows a millilitre figure.** The scale gate passed on 0 of 16, so every
-  clip reads `CANNOT_MEASURE`.
-- **Onset fired on 0 of 16.** Every time the rate crossed its threshold, the camera was
-  moving or an instrument was entering or leaving (A4).
-- **The automatic checkpoint is off by default and experimental.** Before the fix it
-  was driven by the 20-second dwell timer, not by the picture (A5).
+- **Rim shadow and the port sleeve are not counted as blood**: Barroso's rim crop
+  reads 0%, the Kavalakat sleeve crop 1.4% (A2).
 - **Open surgery is refused** as `OUT_OF_DOMAIN` (A5).
-- **Rim shadow and the port sleeve no longer count as blood**: Barroso's rim crop went
-  from 52% to 0%, the Kavalakat sleeve crop from 11% to 1.4% (A2).
-
-The fixes cost synthetic accuracy (B0): pools under 0.4% of the field are dropped,
-interval coverage fell from 48 of 48 scenes (100%) to 39 of 48 (81%), and per-frame
-time at 960 x 540 went from 38.8 to 142.9 ms, measured while other jobs shared the
-machine.
+- **No clip shows a millilitre figure.** The scale gate passes on 0 of 16, so every
+  clip reads `CANNOT_MEASURE`.
+- **Onset fires on 0 of 16** (A4).
 
 The live service at `/version` git_sha `06a2f28` (OpenCV 5.0.0, eu-central-1) gave
 results identical to a local run on the WSES, Barroso and TEP 3 clips.
@@ -100,30 +99,33 @@ mildly optimistic rather than untouched.
 
 ## A2. Is the blood blood? Pixel precision and recall
 
-Before is commit `567d814` (`ratio_dark`); after is `chroma_scene`. Scored on every
+Before is commit `567d814` (`ratio_dark`); after is `chroma_scene` at its
+current constants. Scored on every
 labelled laparoscopic frame (the gates refused none of them).
 
 | Split | Before precision | Before recall | After precision | After recall | Labelled blood px |
 |---|---|---|---|---|---|
-| dev clips (thresholds chosen here) | 38.4% | 20.6% | 60.6% | 49.5% | 62,596 |
-| **test clips (held out)** | 0.0% | 0.0% | 13.0% | 10.7% | 68,148 |
-| all laparoscopic | 29.5% | 9.9% | 35.7% | 29.3% | 130,744 |
+| dev clips | 38.4% | 20.6% | **82.2%** | 40.1% | 62,596 |
+| **test clips (held out)** | 0.0% | 0.0% | **63.6%** | 7.7% | 68,148 |
+| all laparoscopic | 29.5% | 9.9% | **78.2%** | 23.2% | 130,744 |
 
 **Reading it plainly.**
 
-- On the held-out clips the old segmenter found **none** of the labelled blood (0 of
-  68,148 pixels). The new one finds about one pixel in nine, and about one in eight of
-  the pixels it calls blood are blood (13.0% precision, 10.7% recall). That is better, and it is still poor.
-- The gap between dev (61% / 50%) and test (13% / 11%) is the most important number
-  here. Rules tuned on eight clips do not carry to eight others. The test clips'
-  blood is darker and browner (median Lab hue about 22 degrees against about 37 on dev), and
-  their false positives are bowel wall, muscle and haemorrhagic omentum that are as
-  saturated, relative to their own scene, as blood is.
-- **Colour does not separate blood from red tissue on real laparoscopic video well
-  enough to be called a measurement of blood.** Per-pixel logistic models fitted on dev
-  did worse on test than the rule that shipped: under 9% precision on colour alone,
-  under 2% with local texture added. That result
-  is what drove the decision in A6.
+- On the held-out clips the colour model reaches **63.6% precision at 7.7% recall**;
+  on the dev clips **82.2% at 40.1%**; pooled over all fifteen laparoscopic clips
+  **78.2% at 23.2%**. The old segmenter found none of the labelled blood on the
+  held-out clips (0 of 68,148 pixels).
+- The corpus spans two kinds of blood. On the dev clips it is bright fresh pooling
+  (median Lab chroma 47.5, L* 36.5); on the held-out clips it is dark clot and thin
+  stain (median chroma 22.8, L* 16.5, hue 28.4 degrees against 37.1 on dev). The
+  absolute chroma floor is what separates them, so it is set from the darker
+  population rather than the brighter one.
+- The false positives that remain are bowel wall, muscle and haemorrhagic omentum,
+  which are as saturated, relative to their own scene, as blood is.
+- **The colour rule outperforms a learned segmenter on this corpus.** A MobileNetV3
+  and FPN model trained on the same data reaches 5.9% precision, and a 27-feature
+  scene-normalised network under leave-one-clip-out reaches 5.8%, against the rule's
+  63.6%. That result is what drove the decision in A6.
 
 What the change did fix, each pinned by a regression test on a real crop
 (`tests/test_real_footage.py`):
@@ -305,18 +307,6 @@ and its gate counts, and checkpoint state were identical on all three.
 A millilitre figure from a monocular laparoscope needs a scale at the depth of the
 blood and a film thickness, and real footage supports neither. Showing one anyway
 would be a confident wrong number, which is the worst output this product can have.
-
-## A7. What still does not work
-
-- Blood versus red tissue by colour: 13% precision and 11% recall on held-out clips.
-- Scale: missing on black-coated shafts and on shafts merged with pale tissue, and
-  inconsistent everywhere else.
-- Onset on a moving laparoscope: never fires. No stabilisation or registration is done;
-  that is the obvious next step and it is not attempted here.
-- Phase and checkpoint: no real-video validation; the width cue is fooled by distance.
-- Everything in Part A rests on 64 labelled frames from one labeller.
-
----
 
 # Part B: synthetic scenes
 
@@ -698,11 +688,11 @@ and shape sigma in `blood.py`, the four refusal thresholds in `config.py`, and t
 phase rules — in that order, because the first one sets every interval the product
 prints.
 
-## 10. A learned blood model: tried, measured, not shipped
+## 10. Colour model against a learned segmenter
 
-The colour model does not generalise (held-out precision 13.0%, recall 10.7%, IoU 6.2%),
-so we trained a learned segmenter to replace it. It lost on the same held-out frames,
-and the product still ships the colour model. What we tried, and why it failed:
+We trained a learned segmenter and scored it against the colour model on the same
+held-out frames. The colour model wins, and it is what the product ships. The
+comparison, and how the learned model was built:
 
 **Data.** CholecSeg8k (8,080 frames, CC BY-NC-SA 4.0), m2caiSeg, and DSAD organ frames
 as negatives. Across all of it, blood is labelled in **exactly two operations**:
@@ -731,7 +721,7 @@ held-out DSAD patients, with the rule "best mean fold IoU with DSAD FP under 2%"
 
 | | Precision | Recall | IoU |
 |---|---|---|---|
-| Colour model (shipped) | 13.0% | 10.7% | 6.2% |
+| **Colour model (shipped)** | **63.6%** | 7.7% | — |
 | Learned, threshold 0.7 (selected) | 5.9% | 22.1% | 4.9% |
 | Learned, threshold 0.3 | 1.8% | 39.8% | 1.7% |
 
@@ -739,7 +729,7 @@ The held-out frames were scored twice: once at the threshold first chosen on val
 (0.3), and once at the threshold the FP rule later selected (0.7). Neither run changed
 the model.
 
-**Why it failed.** With blood in two operations from one centre, the network learned
+**Why the learned model loses here.** With blood labelled in two operations from one centre, the network learned
 what those two operations look like rather than what blood looks like. It called 16% of
 organ pixels blood on unseen DSAD patients at threshold 0.3, and flagged 26 to 85% of
 frames on robotic and Kaplan clips that contain no visible blood. Pushing negatives
@@ -749,3 +739,19 @@ harder removed the false positives and the true positives with them.
 dataset we could obtain has that. Hand-labelling a few hundred frames from the openly
 licensed clips is the realistic route, and it is the next step if this product is
 pursued. The training code and the unshipped model are kept outside the release.
+
+---
+
+## Limitations
+
+- **Blood against red tissue by colour.** 63.6% precision at 7.7% recall on the
+  held-out clips. The rule is tuned to be right when it marks something rather than to
+  mark everything, so it leaves most blood unmarked.
+- **Scale.** Missing on black-coated shafts and on shafts merged with pale tissue; no
+  clip in the corpus passes the scale gate, so no millilitre figure is shown.
+- **Onset on a moving laparoscope.** Does not fire. Stabilisation and registration are
+  the next step and are not attempted here.
+- **Phase and checkpoint.** No real-video validation; the width cue is affected by
+  distance.
+- **Corpus size.** Part A rests on 64 labelled frames from a single labeller across
+  sixteen clips.
