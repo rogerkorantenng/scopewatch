@@ -1,0 +1,38 @@
+<!doctype html><meta charset=utf-8>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+<style>
+  *{margin:0;padding:0;box-sizing:border-box}
+  body{width:1200px;height:800px;background:#F6F7F8;font-family:Inter,system-ui,sans-serif;
+       display:flex;flex-direction:column;justify-content:center;padding:84px 92px 150px;position:relative;overflow:hidden}
+  /* the field trace, as the page actually draws it, used as a ground */
+  .trace{position:absolute;left:0;top:auto;bottom:0;width:1200px;height:188px;opacity:.42}
+  .mark{width:108px;height:108px;display:block;margin-bottom:34px}
+  h1{font-size:92px;font-weight:800;letter-spacing:-.035em;color:#15181C;line-height:1}
+  .sub{font-size:31px;color:#596069;margin-top:20px;line-height:1.35;max-width:830px}
+  .rule{width:92px;height:5px;background:#0A6E62;border-radius:3px;margin:40px 0 32px}
+  .figs{display:flex;gap:64px}
+  .fig b{display:block;font-size:66px;font-weight:800;color:#0A6E62;letter-spacing:-.03em;
+         font-variant-numeric:tabular-nums;line-height:1}
+  .fig span{display:block;font-size:21px;color:#6E767F;margin-top:9px}
+  .foot{position:absolute;left:92px;bottom:54px;font-size:20px;color:#6E767F;letter-spacing:.02em}
+</style>
+<svg class="trace" viewBox="0 0 1200 300" preserveAspectRatio="none">
+  <path d="M0,230 L60,225 L110,150 L150,186 L200,172 L250,196 L300,120 L340,162 L390,150
+           L440,204 L490,188 L540,96 L580,140 L630,128 L680,176 L730,160 L780,210 L830,190
+           L880,146 L930,178 L980,164 L1030,198 L1080,176 L1130,206 L1200,194"
+        fill="none" stroke="#0A6E62" stroke-width="3.5" stroke-linejoin="round" opacity=".55"/>
+</svg>
+<svg class="mark" viewBox="0 0 26 26" fill="none">
+  <rect width="26" height="26" rx="6" fill="#FF8A3D"/>
+  <path d="M6 18c3.4 0 3.4-10 6.8-10S16.2 18 20 18" stroke="#0B1210" stroke-width="2.4" stroke-linecap="round"/>
+  <circle cx="12.8" cy="8" r="2.1" fill="#0B1210"/>
+</svg>
+<h1>Scopewatch</h1>
+<div class="sub">Measuring blood loss from the camera that is already in the operating room.</div>
+<div class="rule"></div>
+<div class="figs">
+  <div class="fig"><b>63.6%</b><span>precision, held-out clips</span></div>
+  <div class="fig"><b>78.2%</b><span>across all fifteen clips</span></div>
+  <div class="fig"><b>OpenCV 5</b><span>pinned, on AWS</span></div>
+</div>
+<div class="foot">OpenCV AI Competition 2026</div>
