@@ -1,0 +1,128 @@
+{
+  "bg": "#0d1013",
+  "fg": "#F4F6F7",
+  "muted": "#9AA4AB",
+  "accent": "#2FA89A",
+  "line": "#242B30",
+  "panel": "#161B1F",
+  "slides": [
+    {
+      "id": "s01",
+      "kind": "title",
+      "photo": "img/operating-room.jpg",
+      "credit": "Operating theatre \u00b7 public domain, Wikimedia Commons",
+      "kicker": "OpenCV AI Competition 2026",
+      "title": "Scopewatch",
+      "sub": "Measuring blood loss from the camera that is already in the room."
+    },
+    {
+      "id": "s02",
+      "kind": "stat",
+      "photo": "img/blood-bag.jpg",
+      "credit": "Blood bag \u00b7 CC0, Wikimedia Commons",
+      "kicker": "The United States",
+      "stat": "11",
+      "unit": "%",
+      "title": "of maternal deaths are caused by postpartum haemorrhage \u2014 the leading cause of death on the day a baby is born.",
+      "source": "ACOG Committee Opinion 794, Obstetrics & Gynecology, 2019"
+    },
+    {
+      "id": "s03",
+      "kind": "stat",
+      "photo": "img/operating-room.jpg",
+      "credit": "Operating theatre \u00b7 public domain, Wikimedia Commons",
+      "kicker": "California reviewed every one",
+      "stat": "63",
+      "unit": "%",
+      "title": "of haemorrhage deaths were judged highly preventable. Across 2.4 million births, 2014\u20132018.",
+      "source": "California Pregnancy-Associated Mortality Review \u00b7 Obstet Gynecol, 2025"
+    },
+    {
+      "id": "s04",
+      "kind": "stat",
+      "photo": "img/lap-1.jpg",
+      "credit": "Laparoscopic pancreaticoduodenectomy \u00b7 Kaplan, open licence",
+      "kicker": "What went wrong",
+      "stat": "72",
+      "unit": "%",
+      "title": "of those cases involved delayed recognition. Somebody did not see it in time.",
+      "source": "California Pregnancy-Associated Mortality Review \u00b7 Obstet Gynecol, 2025"
+    },
+    {
+      "id": "s05",
+      "kind": "quote",
+      "photo": "img/blood-bag.jpg",
+      "credit": "Blood bag \u00b7 CC0, Wikimedia Commons",
+      "kicker": "The reason, named",
+      "quote": "Imprecise health care provider estimation of actual blood loss during birth and the immediate postpartum period is a leading cause of delayed response to hemorrhage.",
+      "attrib": "American College of Obstetricians and Gynecologists, Committee Opinion 794"
+    },
+    {
+      "id": "s06",
+      "kind": "stat",
+      "photo": "img/lap-2.jpg",
+      "credit": "Laparoscopic pancreaticoduodenectomy \u00b7 Kaplan, open licence",
+      "kicker": "Measured against haematocrit",
+      "stat": "90",
+      "unit": "%",
+      "title": "of cases were underestimated by eye. A fifth of those patients had lost over a litre \u2014 and by eye, none had haemorrhaged at all.",
+      "source": "Edilu et al., caesarean deliveries, 2024"
+    },
+    {
+      "id": "s07",
+      "kind": "points",
+      "photo": "img/lap-3.jpg",
+      "credit": "Laparoscopic pancreaticoduodenectomy \u00b7 Kaplan, open licence",
+      "kicker": "The same shape, in surgery",
+      "title": "61% of 548 recorded gallbladder operations recorded the safety step that prevents bile duct injury.",
+      "points": [
+        "The information was already in front of a camera already in the room",
+        "A person under time pressure was asked to judge it by eye"
+      ],
+      "source": "Prospective cohort, 548 laparoscopic cholecystectomies"
+    },
+    {
+      "id": "s08",
+      "kind": "stat",
+      "kicker": "Scopewatch measures it instead",
+      "stat": "64",
+      "unit": "%",
+      "title": "of the pixels it calls blood are blood, on clips held out from tuning. Across all fifteen laparoscopic clips, 78%.",
+      "source": "Hand-labelled frames, leave-one-clip-out selection \u00b7 see evaluation.md"
+    },
+    {
+      "id": "s09",
+      "kind": "points",
+      "kicker": "Limitations",
+      "title": "What Scopewatch does not do.",
+      "points": [
+        "Tuned to be right when it marks something, so some blood is left unmarked",
+        "No clip here passes the scale gate, so it shows no millilitres",
+        "The bleeding alarm does not fire on a moving laparoscope"
+      ],
+      "source": "Measured on held-out real clips \u00b7 see evaluation.md",
+      "photo": "img/lap-2.jpg",
+      "credit": "Laparoscopic pancreaticoduodenectomy \u00b7 Kaplan, open licence"
+    },
+    {
+      "id": "s10",
+      "kind": "stat",
+      "kicker": "What comes next is data, not modelling",
+      "stat": "+3.5",
+      "unit": "pts",
+      "title": "of held-out precision for each labelled operation we add.",
+      "source": "Fitted across the current fifteen-clip corpus",
+      "photo": "img/lap-3.jpg",
+      "credit": "Laparoscopic pancreaticoduodenectomy \u00b7 Kaplan, open licence"
+    },
+    {
+      "id": "s11",
+      "kind": "title",
+      "photo": "img/operating-room.jpg",
+      "credit": "Operating theatre \u00b7 public domain, Wikimedia Commons",
+      "kicker": "Scopewatch",
+      "title": "A measurement instrument.",
+      "sub": "Not a medical device. It takes no clinical action."
+    }
+  ]
+}
