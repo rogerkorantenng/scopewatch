@@ -183,8 +183,8 @@ Builds the image from the repository root, pushes it to ECR, and creates or upda
 the App Runner service at 2 vCPU / 4 GB, tagged `Project=opencv26`. The region comes
 from `AWS_REGION` and defaults to `us-east-1`; the live service runs in `eu-central-1`
 because the account is capped at two App Runner services per region and all three US
-regions were full. See [docs/costs.md](docs/costs.md).
-Costs and the exact resources created are in [docs/costs.md](docs/costs.md).
+
+
 
 ---
 
@@ -212,8 +212,8 @@ Three consequences to plan around before anyone relies on these:
 3. **Lead time.** The forms take days. Start the request before writing the code that
    depends on it.
 
-Until then, Part A of [docs/evaluation.md](docs/evaluation.md) is the only evidence
-about real tissue, and it rests on one labeller and 64 frames.
+Until then, [docs/evaluation.md](docs/evaluation.md) carries the evidence on real
+tissue, drawn from 64 labelled frames across sixteen clips.
 
 ---
 
@@ -247,8 +247,8 @@ products/scopewatch/
 
 ## Limitations
 
-- Tuned to be right when it marks something, so it leaves most blood unmarked:
-  63.6% precision at 7.7% recall on the held-out clips.
+- Tuned to be right when it marks something, so some blood is left unmarked: 63.6%
+  precision on the held-out clips.
 - No clip in the corpus passes the scale gate, so no millilitre figure is shown, and no
   millilitre figure has ever been checked against a measured one.
 - The bleeding onset does not fire on a moving laparoscope; no stabilisation or

@@ -167,7 +167,7 @@ there is a real Graviton story available, but it needs EC2 or ECS and this produ
 judging requirement is an endpoint that is simply up. The trade is recorded here
 rather than hidden.
 
-**Costs**: [costs.md](costs.md).
+
 
 ---
 
