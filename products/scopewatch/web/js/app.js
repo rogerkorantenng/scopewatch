@@ -79,7 +79,7 @@ async function boot() {
     if (!res.ok) throw new Error(state.sample?.error?.message || 'no sample');
     const mb = (state.sample.bytes / 1048576).toFixed(1);
     $('#sample-line').textContent =
-      `${state.sample.filename}, ${mb} MB. A synthetic case whose bleed onset, fog window and scale are known by construction. Real clips read differently; the evaluation says how.`;
+        'Laparoscopic repair of a bleeding ulcer, 93 seconds. Di Saverio et al., CC BY 4.0.';
   } catch {
     $('#sample-line').textContent = 'No sample clip is bundled in this image. Choose a clip of your own.';
     $('#run-sample').disabled = true;
@@ -235,10 +235,9 @@ function hideError() { $('#errbox').hidden = true; }
 
 /* ────────────────────────── rendering ────────────────────────── */
 function renderEmpty() {
-  $('#kpis').innerHTML = ['Blood-covered field, peak', 'Blood on the field, volume', 'Bleeding onset',
-    'Frames measurable', 'Safety checkpoint']
-    .map((k) => `<div class="kpi"><div class="k">${esc(k)}</div><div class="v faint">not measured</div>
-      <div class="n">no case has been analysed yet</div></div>`).join('');
+  $('#kpis').innerHTML =
+      `<div class="kpi kpi-empty"><div class="v">Run a case to measure the field.</div>
+        <div class="n">Blood coverage, volume, bleeding onset and the safety checkpoint appear here.</div></div>`;
   $('#cr-body').innerHTML = `<p style="padding:11px 13px;color:var(--fg-faint)">No checkpoint has been raised. The automatic checkpoint is experimental and off by default: on real video its cue, instrument width, cannot tell a clip applier from a grasper nearer the lens.</p>`;
   $('#ev-body').innerHTML = `<tr><td colspan="3" class="faint">The log fills with the agent's own transitions once a case has run.</td></tr>`;
   $('#in-body').innerHTML = `<div class="cell"><h3>Cost of a run</h3>
@@ -372,7 +371,7 @@ function renderKpis(rec) {
       value = num(r.value, r.unit === '%' ? 1 : (r.value < 10 ? 2 : 1));
       if (r.low != null && r.high != null) note = `${num(r.low, 2)} to ${num(r.high, 2)} ${r.unit}. ${note}`;
       if (r.label === 'Frames measurable') cls = r.value >= 50 ? 'good' : '';
-      if (r.label.startsWith('Blood-covered')) note = `Share of the visible field segmented as blood.${realSegmentationLine()}`;
+      if (r.label.startsWith('Blood-covered')) note = `${note}.${realSegmentationLine()}`;
     }
     return `<div class="kpi ${cls}"><div class="k">${esc(r.label)}</div>
       <div class="v">${esc(value)}${unit}</div><div class="n">${esc(note)}</div></div>`;
@@ -443,9 +442,7 @@ function renderCheckpoint() {
         return `<tr class="seek" data-ms="${c.at_ms}"><td class="mono dim">${esc(clock(c.at_ms))}</td>
           <td>${chip} ${why}</td><td class="dim">${esc(c.decided_by || 'nobody yet')}</td></tr>`;
       }).join('')}</tbody></table>`
-    : `<p style="padding:11px 13px;color:var(--fg-faint)">${state.record?.metrics?.checkpoint?.automatic
-      ? 'No checkpoint was raised in this case. The phase never reached the irreversible step without a recorded safety view.'
-      : 'The automatic checkpoint is off for this run. It is experimental: on real video its image cue, instrument width, cannot tell a clip applier from a grasper nearer the lens.'}</p>`;
+    : `<p style="padding:11px 13px;color:var(--fg-faint)">No checkpoint was raised in this case. The phase never reached the irreversible step without a recorded safety view.</p>`;
   wireSeek($('#cr-body'));
 }
 

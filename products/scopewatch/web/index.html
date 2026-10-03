@@ -43,15 +43,10 @@
       <a href="#evidence" data-nav="evidence"><svg class="ic" viewBox="0 0 16 16" fill="none" aria-hidden="true"><path d="M8 1.8l5.4 2.4v4c0 3.3-2.3 5.5-5.4 6.2C4.9 13.7 2.6 11.5 2.6 8.2v-4z" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round"/></svg>Evidence pack<span class="ct" id="ct-evidence">0</span></a>
     </nav>
 
-    <div class="railfoot" id="railfoot" data-cost="App Runner 2 vCPU / 4 GB — $0.144/hr">
-      <div class="rr"><span>OpenCV</span><span id="st-opencv">reading</span></div>
-      <div class="rr"><span>Frames analysed</span><span id="st-frames">none yet</span></div>
-      <div class="meter" id="st-meter"><i style="width:0%"></i></div>
-      <div class="rr"><span>Slowest stage</span><span id="st-stage">—</span></div>
-      <div class="rr"><span>Analysis time</span><span id="st-total">—</span></div>
-      <div class="rr"><span id="st-inst">App Runner 2 vCPU / 4 GB</span><span id="st-cost">$0.144/hr</span></div>
-    </div>
-  </aside>
+      <div class="railfoot" id="railfoot">
+        <div class="rr"><span>OpenCV</span><span id="st-opencv">reading</span></div>
+      </div>
+    </aside>
 
   <!-- ───────────────────────── main ───────────────────────── -->
   <div class="main" id="main">
@@ -63,7 +58,6 @@
       <div class="tb-item" id="tb-video">resolution pending</div>
       <div class="tb-right">
         <span class="chip" id="tb-state">No case loaded</span>
-        <span class="chip warn badge" role="note">Retrospective measurement, not intra-operative guidance</span>
       </div>
     </header>
 
@@ -208,6 +202,9 @@
     </div>
   </div>
 </div>
+
+<p class="page-disclaimer">Scopewatch is a retrospective measurement instrument. It is not a
+  medical device and takes no clinical action.</p>
 
 <script type="module" src="/assets/js/app.js"></script>
 </body>

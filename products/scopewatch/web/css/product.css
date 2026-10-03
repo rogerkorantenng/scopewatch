@@ -1,6 +1,6 @@
 /* ══════════════════════════════════════════════════════════════
    Scopewatch — "Ligature", the operating field instrument.
-   Tokens Layout and component text
+   Tokens from docs/design/atlas.md §1. Layout and component text
    lifted from docs/mockups/operating-field.html, with every type
    size lifted to the 14 px floor the brief sets.
 
@@ -9,17 +9,25 @@
    ══════════════════════════════════════════════════════════════ */
 
 :root{
-  --bg:#0B1210;  --bg-raised:#141F1B;  --bg-inset:#1D2C27;
-  --border:#24352F;  --border-strong:#33483F;
-  --fg:#E9F1EC;  --fg-muted:#9DB3AC;  --fg-faint:#7F968F;
-  --accent:#FF8A3D;  --accent-fg:#0B1210;
-  --danger:#FF8A3D;  --danger-fg:#0B1210;   /* one attention colour, by design */
-  --ok:#5FD3A6;  --warn:#E8C25A;
+  /* Light by default. The app shows tissue and blood: neutral surroundings keep the
+     image's own colour honest. Contrast figures are against #FFFFFF. */
+  --bg:#F6F7F8;  --bg-raised:#FFFFFF;  --bg-inset:#EDEFF1;
+  --border:#DDE1E5;  --border-strong:#C3C9CF;
+  --fg:#15181C;        /* 17.8:1 */
+  --fg-muted:#596069;  /*  6.4:1 */
+  --fg-faint:#6E767F;  /*  4.6:1 */
+  --accent:#0A6E62;    /*  6.1:1 — a measured value, and the primary action */
+  --accent-fg:#FFFFFF;
+  --warn:#8A5600;      /*  6.2:1 — a refusal. Deliberate, not an error. */
+  --warn-soft:#FCF4E6;
+  --danger:#B3261E;    /*  6.5:1 */
+  --danger-fg:#FFFFFF;
+  --ok:#0A6E62;
   --font-body:"Archivo",system-ui,sans-serif;
   --font-display:"Newsreader",Georgia,serif;
   --font-mono:ui-monospace,"SFMono-Regular",Menlo,"Liberation Mono",monospace;
-  --rail:266px;
-  --radius-sm:3px; --radius:5px; --radius-lg:8px;
+  --rail:248px;
+  --radius-sm:4px; --radius:6px; --radius-lg:10px;
 }
 
 *,*::before,*::after{box-sizing:border-box}
@@ -327,3 +335,13 @@ html{scroll-behavior:smooth}
   .chip.badge{white-space:normal;line-height:1.35}
   .crumb{max-width:100%}
 }
+
+/* The empty state is one instruction, not five cards of nothing. */
+.kpi-empty{grid-column:1/-1;background:var(--bg-raised);border:1px solid var(--border);
+  border-radius:var(--radius);padding:22px 24px}
+.kpi-empty .v{font-size:17px;font-weight:600;color:var(--fg);line-height:1.3}
+.kpi-empty .n{font-size:14px;color:var(--fg-muted);margin-top:6px;line-height:1.45}
+
+/* The disclaimer sits at the foot of the page, not in the toolbar. */
+.page-disclaimer{margin:28px 0 0;padding-top:14px;border-top:1px solid var(--border);
+  font-size:13px;color:var(--fg-faint)}
