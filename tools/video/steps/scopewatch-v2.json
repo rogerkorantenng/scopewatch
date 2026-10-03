@@ -1,0 +1,249 @@
+{
+  "_comment": "Real footage at 06a2f28 (media/real/scopewatch/PROVENANCE.md). Four clips uploaded through #file-input in the product's own UI and run on the live service with the UI's params ({}): WSES (bleeding field, blood-covered share, volume CANNOT_MEASURE, onset gates), TEP 3 (NO_SCALE_REFERENCE), Barroso (rim shadow now 0%, checkpoint off), Gupta (open surgery, OUT_OF_DOMAIN). Completion: #run-sample re-enabled and progress at 100%. Credits are drawn per beat by cut.py. The first eval fails the take unless /version is 06a2f28.",
+  "viewport": {
+    "width": 1920,
+    "height": 1080
+  },
+  "samples": [],
+  "faces": {
+    "surfaces": [
+      {
+        "selector": "#video",
+        "shows": "video"
+      }
+    ]
+  },
+  "steps": [
+    {
+      "action": "goto",
+      "url": "/"
+    },
+    {
+      "action": "wait_for",
+      "selector": "#run-sample"
+    },
+    {
+      "action": "pan",
+      "to": "#page-lede",
+      "seconds": 3.0,
+      "label": "front page"
+    },
+    {
+      "action": "move",
+      "selector": "#file-label"
+    },
+    {
+      "action": "upload",
+      "selector": "#file-input",
+      "file": "../../../media/real/scopewatch/wses-laparoscopic-bleeding-ulcer-repair.mp4"
+    },
+    {
+      "action": "wait_js",
+      "label": "wses: job",
+      "script": "!document.querySelector('#run-sample').disabled && !document.querySelector('.kpi-empty') && document.querySelectorAll('#kpis .kpi').length > 1",
+      "timeout": 240000
+    },
+    {
+      "action": "play",
+      "selector": "#video",
+      "settle": 1.0
+    },
+    {
+      "action": "pan",
+      "to": "#video",
+      "seconds": 6.0,
+      "label": "wses: the clip"
+    },
+    {
+      "action": "pan",
+      "to": "#kpis",
+      "seconds": 5.0,
+      "label": "wses: kpis",
+      "from": "#video"
+    },
+    {
+      "action": "pan",
+      "to": "#kpis",
+      "seconds": 4.0,
+      "label": "wses: blood-covered field"
+    },
+    {
+      "action": "pan",
+      "to": "#field-trace",
+      "seconds": 7.0,
+      "label": "wses: field trace",
+      "from": "#kpis"
+    },
+    {
+      "action": "pan",
+      "to": "#kpis",
+      "seconds": 4.5,
+      "label": "wses: volume cannot measure",
+      "from": "#field-trace"
+    },
+    {
+      "action": "pan",
+      "to": "#instruments",
+      "seconds": 5.0,
+      "label": "wses: why no scale",
+      "from": "#kpis"
+    },
+    {
+      "action": "pan",
+      "to": "#evidence",
+      "seconds": 8.0,
+      "label": "wses: evidence behind the numbers",
+      "from": "#instruments"
+    },
+    {
+      "action": "pan",
+      "to": "#evidence",
+      "seconds": 5.0,
+      "label": "wses: frames measurable"
+    },
+    {
+      "action": "scroll",
+      "selector": "#page-lede",
+      "ms": 1200
+    },
+    {
+      "action": "move",
+      "selector": "#file-label"
+    },
+    {
+      "action": "upload",
+      "selector": "#file-input",
+      "file": "../../../media/real/scopewatch/gupta-gallbladder-torsion-cholecystectomy.mp4"
+    },
+    {
+      "action": "wait_js",
+      "label": "gupta: job",
+      "script": "!document.querySelector('#run-sample').disabled && !document.querySelector('.kpi-empty') && document.querySelectorAll('#kpis .kpi').length > 1",
+      "timeout": 240000
+    },
+    {
+      "action": "play",
+      "selector": "#video",
+      "settle": 1.0
+    },
+    {
+      "action": "pan",
+      "to": "#video",
+      "seconds": 4.0,
+      "label": "gupta: open surgery"
+    },
+    {
+      "action": "pan",
+      "to": "#cannot",
+      "seconds": 7.0,
+      "label": "gupta: out of domain",
+      "from": "#video"
+    },
+    {
+      "action": "scroll",
+      "selector": "#page-lede",
+      "ms": 1200
+    },
+    {
+      "action": "move",
+      "selector": "#file-label"
+    },
+    {
+      "action": "upload",
+      "selector": "#file-input",
+      "file": "../../../media/real/scopewatch/barroso-laparoscopic-inguinal-ring-suture.mp4"
+    },
+    {
+      "action": "wait_js",
+      "label": "barroso: job",
+      "script": "!document.querySelector('#run-sample').disabled && !document.querySelector('.kpi-empty') && document.querySelectorAll('#kpis .kpi').length > 1",
+      "timeout": 240000
+    },
+    {
+      "action": "play",
+      "selector": "#video",
+      "settle": 1.0
+    },
+    {
+      "action": "pan",
+      "to": "#video",
+      "seconds": 3.5,
+      "label": "barroso: the clip"
+    },
+    {
+      "action": "pan",
+      "to": "#kpis",
+      "seconds": 5.0,
+      "label": "barroso: rim reads zero",
+      "from": "#video"
+    },
+    {
+      "action": "scroll",
+      "selector": "#page-lede",
+      "ms": 1200
+    },
+    {
+      "action": "move",
+      "selector": "#file-label"
+    },
+    {
+      "action": "upload",
+      "selector": "#file-input",
+      "file": "../../../media/real/scopewatch/anpol42-tep-hernia-3.mp4"
+    },
+    {
+      "action": "wait_js",
+      "label": "tep3: job",
+      "script": "!document.querySelector('#run-sample').disabled && !document.querySelector('.kpi-empty') && document.querySelectorAll('#kpis .kpi').length > 1",
+      "timeout": 240000
+    },
+    {
+      "action": "play",
+      "selector": "#video",
+      "settle": 1.0
+    },
+    {
+      "action": "pan",
+      "to": "#video",
+      "seconds": 3.5,
+      "label": "tep3: the clip"
+    },
+    {
+      "action": "pan",
+      "to": "#kpis",
+      "seconds": 5.0,
+      "label": "tep3: port sleeve",
+      "from": "#video"
+    },
+    {
+      "action": "pan",
+      "to": "#field-trace",
+      "seconds": 5.0,
+      "label": "tep3: trace",
+      "from": "#kpis"
+    }
+  ],
+  "highlights": {
+    "lede": {
+      "selector": "#page-lede"
+    },
+    "kpi_blood": {
+      "selector": "#kpis > .kpi:nth-child(1)"
+    },
+    "kpi_volume": {
+      "selector": "#kpis > .kpi:nth-child(2)"
+    },
+    "trace": {
+      "selector": "#field-trace"
+    },
+    "instruments": {
+      "selector": "#instruments"
+    },
+    "evidence": {
+      "selector": "#evidence"
+    },
+    "cannot": {
+      "selector": "#cannot"
+    }
+  }
+}

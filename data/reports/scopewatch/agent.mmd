@@ -1,0 +1,23 @@
+flowchart LR
+    F["Laparoscope<br/>frame"] --> Q{"Usable?<br/>focus · fog · occlusion<br/>exposure · in domain"}
+
+    Q -- yes --> B["Blood-covered<br/>share"]
+    B --> O{"Onset?"}
+    O -- yes --> RE["Re-read ±5 s<br/>at every frame"]
+    RE -. "dense onset<br/>replaces coarse" .-> B
+
+    Q -- "no · fog run" --> FOG["Suppress<br/>onset"]
+    FOG --> LENS["Ask for a<br/>clean lens"]
+
+    Q -- yes --> P["Phase<br/>(experimental)"]
+    P --> H{"Critical approach,<br/>no safety view?"}
+    H -- yes --> HOLD["Hold until a named<br/>person answers"]
+
+    classDef see fill:#eef6f4,stroke:#0f5b52,color:#123
+    classDef ask fill:#ffffff,stroke:#0f5b52,color:#123
+    classDef act fill:#e07a2e,stroke:#b45f1d,color:#fff
+    classDef hold fill:#0f5b52,stroke:#0a443d,color:#fff
+    class F,B,FOG,P see
+    class Q,O,H ask
+    class RE,LENS act
+    class HOLD hold

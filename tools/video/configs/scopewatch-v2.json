@@ -1,0 +1,255 @@
+{
+  "product": "scopewatch",
+  "limit": 299.0,
+  "team_gap": 0.0,
+  "narration": "/home/rogerkorantenng/Downloads/Scopewatch.mp3",
+  "whisper": "/tmp/sw-vid/tx.json",
+  "sources_seconds": 4.0,
+  "sources": [
+    "Laparoscopic repair of a bleeding ulcer. Di Saverio S et al., World J Emerg Surg 2014. CC BY 4.0.",
+    "Laparoscopic inguinal hernia repair. Barroso C et al., Front Pediatr 2017. CC BY 4.0.",
+    "Open cholecystectomy. Gupta V et al., Cases J 2009. CC BY 2.0.",
+    "Slide backgrounds: Kaplan laparoscopic clips (open licence); Wikimedia Commons (PD / CC0)."
+  ],
+  "beats": [
+    {
+      "kind": "slide",
+      "label": "title",
+      "image": "build/scopewatch/slides2/s01.png",
+      "zoom": 1.05
+    },
+    {
+      "kind": "slide",
+      "label": "11% US",
+      "image": "build/scopewatch/slides2/s02.png",
+      "cue": "In the United States postpartum"
+    },
+    {
+      "kind": "slide",
+      "label": "63% preventable",
+      "image": "build/scopewatch/slides2/s03.png",
+      "cue": "California reviews every one"
+    },
+    {
+      "kind": "slide",
+      "label": "72% delayed",
+      "image": "build/scopewatch/slides2/s04.png",
+      "cue": "delayed recognition Somebody did not"
+    },
+    {
+      "kind": "slide",
+      "label": "ACOG quote",
+      "image": "build/scopewatch/slides2/s05.png",
+      "cue": "The American College of Obstetricians"
+    },
+    {
+      "kind": "slide",
+      "label": "90% by eye",
+      "image": "build/scopewatch/slides2/s06.png",
+      "cue": "Measured against hematocrit"
+    },
+    {
+      "kind": "slide",
+      "label": "surgery too",
+      "image": "build/scopewatch/slides2/s07.png",
+      "cue": "The same shape"
+    },
+    {
+      "kind": "slide",
+      "label": "our result",
+      "image": "build/scopewatch/slides2/s08.png",
+      "cue": "Scopewatch measures it instead"
+    },
+    {
+      "kind": "demo",
+      "label": "the clip plays",
+      "cue": "This is a laparoscopic repair",
+      "video": "build/scopewatch/demo-v4/app.mp4",
+      "from_step": "wses: the clip",
+      "to_step": "wses: the clip",
+      "footage": "whole",
+      "credit": "Bleeding ulcer repair: Di Saverio S et al., World J Emerg Surg 2014, CC BY 4.0"
+    },
+    {
+      "kind": "demo",
+      "label": "blood-covered field",
+      "cue": "The blood covered field peaks",
+      "video": "build/scopewatch/demo-v4/app.mp4",
+      "from_step": "wses: kpis",
+      "to_step": "wses: blood-covered field",
+      "footage": "whole",
+      "credit": "Bleeding ulcer repair: Di Saverio S et al., World J Emerg Surg 2014, CC BY 4.0",
+      "boxes": [
+        {
+          "id": "kpi_blood",
+          "cue": "The blood covered field peaks"
+        }
+      ]
+    },
+    {
+      "kind": "demo",
+      "label": "the three tests",
+      "cue": "A pixel is blood when it clears",
+      "video": "build/scopewatch/demo-v4/app.mp4",
+      "from_step": "wses: blood-covered field",
+      "to_step": "wses: blood-covered field",
+      "footage": "whole",
+      "credit": "Bleeding ulcer repair: Di Saverio S et al., World J Emerg Surg 2014, CC BY 4.0"
+    },
+    {
+      "kind": "demo",
+      "label": "field trace",
+      "cue": "Here is the field trace",
+      "video": "build/scopewatch/demo-v4/app.mp4",
+      "from_step": "wses: field trace",
+      "to_step": "wses: field trace",
+      "footage": "whole",
+      "credit": "Bleeding ulcer repair: Di Saverio S et al., World J Emerg Surg 2014, CC BY 4.0",
+      "boxes": [
+        {
+          "id": "trace",
+          "cue": "Here is the field trace"
+        }
+      ]
+    },
+    {
+      "kind": "demo",
+      "label": "volume refused",
+      "cue": "Now the volume row",
+      "video": "build/scopewatch/demo-v4/app.mp4",
+      "from_step": "wses: volume cannot measure",
+      "to_step": "wses: volume cannot measure",
+      "footage": "whole",
+      "credit": "Bleeding ulcer repair: Di Saverio S et al., World J Emerg Surg 2014, CC BY 4.0"
+    },
+    {
+      "kind": "demo",
+      "label": "why no scale",
+      "cue": "Scale comes from an instrument shaft",
+      "video": "build/scopewatch/demo-v4/app.mp4",
+      "from_step": "wses: why no scale",
+      "to_step": "wses: why no scale",
+      "footage": "whole",
+      "credit": "Bleeding ulcer repair: Di Saverio S et al., World J Emerg Surg 2014, CC BY 4.0"
+    },
+    {
+      "kind": "demo",
+      "label": "evidence panel",
+      "cue": "This is the evidence behind the numbers",
+      "video": "build/scopewatch/demo-v4/app.mp4",
+      "from_step": "wses: evidence behind the numbers",
+      "to_step": "wses: evidence behind the numbers",
+      "footage": "whole",
+      "credit": "Bleeding ulcer repair: Di Saverio S et al., World J Emerg Surg 2014, CC BY 4.0",
+      "boxes": [
+        {
+          "id": "evidence",
+          "cue": "This is the evidence behind the numbers"
+        }
+      ]
+    },
+    {
+      "kind": "demo",
+      "label": "frames measurable",
+      "cue": "536 of 561 frames were measurable",
+      "video": "build/scopewatch/demo-v4/app.mp4",
+      "from_step": "wses: frames measurable",
+      "to_step": "wses: frames measurable",
+      "footage": "whole",
+      "credit": "Bleeding ulcer repair: Di Saverio S et al., World J Emerg Surg 2014, CC BY 4.0"
+    },
+    {
+      "kind": "demo",
+      "label": "open surgery",
+      "cue": "Here is open surgery",
+      "video": "build/scopewatch/demo-v4/app.mp4",
+      "from_step": "gupta: open surgery",
+      "to_step": "gupta: open surgery",
+      "footage": "whole",
+      "credit": "Open cholecystectomy: Gupta V et al., Cases J 2009, CC BY 2.0"
+    },
+    {
+      "kind": "demo",
+      "label": "refused by name",
+      "cue": "It refuses it outright",
+      "video": "build/scopewatch/demo-v4/app.mp4",
+      "from_step": "gupta: out of domain",
+      "to_step": "gupta: out of domain",
+      "footage": "whole",
+      "credit": "Open cholecystectomy: Gupta V et al., Cases J 2009, CC BY 2.0"
+    },
+    {
+      "kind": "demo",
+      "label": "rim reads zero",
+      "cue": "rim of the scope circle reads zero",
+      "video": "build/scopewatch/demo-v4/app.mp4",
+      "from_step": "barroso: rim reads zero",
+      "to_step": "barroso: rim reads zero",
+      "footage": "whole",
+      "credit": "Inguinal hernia repair: Barroso C et al., Front Pediatr 2017, CC BY 4.0",
+      "boxes": [
+        {
+          "id": "kpi_blood",
+          "cue": "rim of the scope circle reads zero"
+        }
+      ]
+    },
+    {
+      "kind": "demo",
+      "label": "port sleeve",
+      "cue": "and the inside of a port sleeve",
+      "video": "build/scopewatch/demo-v4/app.mp4",
+      "from_step": "tep3: port sleeve",
+      "to_step": "tep3: port sleeve",
+      "footage": "whole",
+      "credit": "TEP hernia repair, open licence",
+      "boxes": [
+        {
+          "id": "kpi_blood",
+          "cue": "and the inside of a port sleeve"
+        }
+      ]
+    },
+    {
+      "kind": "demo",
+      "label": "pinned to OpenCV 5",
+      "cue": "The pipeline is",
+      "video": "build/scopewatch/demo-v4/app.mp4",
+      "from_step": "tep3: trace",
+      "to_step": "tep3: trace",
+      "footage": "whole",
+      "credit": "Bleeding ulcer repair: Di Saverio S et al., World J Emerg Surg 2014, CC BY 4.0"
+    },
+    {
+      "kind": "demo",
+      "label": "learned vs colour",
+      "cue": "We also trained a learned",
+      "video": "build/scopewatch/demo-v4/app.mp4",
+      "from_step": "tep3: trace",
+      "to_step": "tep3: trace",
+      "footage": "whole",
+      "credit": "Bleeding ulcer repair: Di Saverio S et al., World J Emerg Surg 2014, CC BY 4.0"
+    },
+    {
+      "kind": "slide",
+      "label": "limitations",
+      "image": "build/scopewatch/slides2/s09.png",
+      "cue": "Scopewatch is tuned to be right"
+    },
+    {
+      "kind": "slide",
+      "label": "+3.5 points",
+      "image": "build/scopewatch/slides2/s10.png",
+      "cue": "What comes next"
+    },
+    {
+      "kind": "slide",
+      "label": "closing",
+      "image": "build/scopewatch/slides2/s11.png",
+      "cue": "It is a measurement instrument"
+    }
+  ],
+  "end_card": {
+    "seconds": 4.0
+  }
+}
