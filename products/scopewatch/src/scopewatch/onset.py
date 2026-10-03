@@ -384,13 +384,11 @@ def analyse(
             f"(peak {peak_any:.2f} {unit} over the whole clip)"
         )
     else:
-        parts = [
-            f"{blocked[g]} by {GATE_WORDS[g]}" for g in GATES if blocked.get(g)
-        ]
+        top = max((g for g in GATES if blocked.get(g)),
+                   key=lambda g: blocked[g], default=None)
         reason = (
-            f"the rate reached {threshold:.2f} {unit} on {candidates} frame"
-            f"{'s' if candidates != 1 else ''} (peak {peak_any:.2f} {unit}), and every "
-            f"one was stopped: {'; '.join(parts)}"
+            f"the rate crossed the threshold, but {GATE_WORDS[top]} each time"
+            if top else "the rate crossed the threshold, but every crossing was gated"
         )
     return series, Onset(
         False,

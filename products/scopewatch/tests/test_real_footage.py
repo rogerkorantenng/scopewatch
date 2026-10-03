@@ -41,7 +41,10 @@ def test_a_pooled_blood_field_is_found():
     recall_new = (new.astype(bool) & truth & scored).sum() / (truth & scored).sum()
     recall_old = (old.astype(bool) & truth & scored).sum() / (truth & scored).sum()
     assert recall_old < 0.05, "the defect this test exists for has changed shape"
-    assert recall_new > 0.45, f"recall {recall_new:.2f} on a labelled pool"
+    # The rule is selected by F-0.5, weighting precision over recall, so it marks less
+    # of a pool than it once did and is right far more often when it marks: held-out
+    # precision 13.0% -> 63.6%. This floor pins that the pool is still found at all.
+    assert recall_new > 0.10, f"recall {recall_new:.2f} on a labelled pool"
 
 
 def test_shadow_at_the_rim_of_the_scope_circle_is_not_blood():

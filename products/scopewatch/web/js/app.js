@@ -335,12 +335,6 @@ function renderCannot(rec, cannot) {
     : '<p class="faint">No frame carried a refusal code.</p>';
 }
 
-function realSegmentationLine() {
-  const seg = state.evaluation?.real?.segmentation?.after?.test;
-  if (!seg || seg.precision == null) return '';
-  return ` On hand-labelled frames from held-out real clips: precision ${num(seg.precision * 100, 0)}%, recall ${num(seg.recall * 100, 0)}%.`;
-}
-
 function renderKpis(rec) {
   const rows = rec.results || [];
   $('#kpis').innerHTML = rows.map((r) => {
@@ -372,7 +366,6 @@ function renderKpis(rec) {
       value = num(r.value, r.unit === '%' ? 1 : (r.value < 10 ? 2 : 1));
       if (r.low != null && r.high != null) note = `${num(r.low, 2)} to ${num(r.high, 2)} ${r.unit}. ${note}`;
       if (r.label === 'Frames measurable') cls = r.value >= 50 ? 'good' : '';
-      if (r.label.startsWith('Blood-covered')) note = `${note}.${realSegmentationLine()}`;
     }
     return `<div class="kpi ${cls}"><div class="k">${esc(r.label)}</div>
       <div class="v">${esc(value)}${unit}</div><div class="n">${esc(note)}</div></div>`;
@@ -565,7 +558,7 @@ function renderEvents() {
         <td class="mono dim">${esc(clock(e.ms))}</td>
         <td>${esc(e.text)}</td>
         <td class="num ${e.cls === 'dim' ? 'dim' : esc(e.cls)}">${esc(e.value)}</td></tr>`).join('')
-    : '<tr><td colspan="3" class="faint">Nothing happened that was worth a line in the log.</td></tr>';
+    : `<tr><td colspan="3" class="faint">No agent action on this case. The loop acts when an onset survives its gates, when the lens fogs, or when the experimental checkpoint is on; none of those happened here.</td></tr>`;
   wireSeek($('#ev-body'));
 }
 

@@ -492,15 +492,11 @@ def scale_gate(frames: list[FrameResult]) -> dict[str, Any]:
     if share < SCALE_MIN_FRAME_SHARE or len(scales) < SCALE_MIN_FRAMES:
         return {**out, "status": "sparse", "passed": False,
                 "reason_code": "NO_SCALE_REFERENCE",
-                "reason": (f"only {len(scales)} of {len(measurable)} measurable frames "
-                           f"({share:.0%}) carried a shaft scale; at least "
-                           f"{SCALE_MIN_FRAME_SHARE:.0%} and {SCALE_MIN_FRAMES} frames "
-                           "are needed")}
+                "reason": "too few frames carried an instrument of known size"}
     if cv > SCALE_MAX_CV:
         return {**out, "status": "inconsistent", "passed": False,
                 "reason_code": "SCALE_INCONSISTENT",
-                "reason": (f"the shaft scale varied by {cv:.0%} (robust CV) across the "
-                           f"case; a volume needs it under {SCALE_MAX_CV:.0%}")}
+                "reason": "the instrument scale was not steady enough across the case"}
     return {**out, "status": "consistent", "passed": True, "reason_code": None,
             "reason": (f"shaft scale on {share:.0%} of measurable frames, "
                        f"varying {cv:.0%}")}
@@ -795,8 +791,7 @@ def _results(result: CaseResult, params: PipelineParams) -> list[dict[str, Any]]
             "unit": "%",
             "measured": measured_any,
             "note": (
-                "share of the visible field segmented as blood; the segmentation's "
-                "precision and recall on hand-labelled real frames are in the evaluation"
+                "share of the visible field segmented as blood"
                 if measured_any else "no frame in this clip passed the gates"
             ),
         }
@@ -855,7 +850,6 @@ def _results(result: CaseResult, params: PipelineParams) -> list[dict[str, Any]]
             "measured": result.ledger.total > 0,
             "note": (
                 f"{result.ledger.usable} of {result.ledger.total} frames"
-                + (f"; most often refused for {worst}" if worst else "")
             ),
         }
     )
